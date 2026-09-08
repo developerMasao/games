@@ -186,6 +186,7 @@ runtime rather than loaded, so there is not a single image or audio file in the 
 | **Cover image**（必須） | `cover.png` | 630 × 500 |
 | Cover image（別案・夜の敷地） | `cover-alt.png` | 630 × 500 |
 | Screenshots | `01-canteen.png` … `05-washroom.png` | 960 × 600 |
+| Trailer | `dist/store/trailer.webm`（→ YouTube 経由） | 1280 × 720 |
 
 スクリーンショットの並び順は 01→05 が意図した流れ。
 
@@ -201,7 +202,43 @@ runtime rather than loaded, so there is not a single image or audio file in the 
 
 ---
 
-## 6. 公開
+## 6. トレイラー動画
+
+`dist/store/trailer.webm` を **YouTube か Vimeo にアップロード**する（itch.io は動画ファイルを直接受け付けない）。
+公開後、その URL を **Description の本文に単独の行として貼る**と itch.io が自動で埋め込む。
+プロジェクト編集画面に動画専用の欄が出ている場合はそちらでもよい。
+
+| | |
+| --- | --- |
+| 長さ | 約 50 秒 |
+| 解像度 | 1280 x 720 / VP9 + Opus |
+| サイズ | 約 30 MB |
+
+構成:
+
+| 時間 | 内容 |
+| --- | --- |
+| 0:00 | タイトル（夜の敷地） |
+| 0:04 | 配管を這って施設に入る |
+| 0:10 | 見つからないように背後を取る |
+| 0:17 | 警備兵は視界と音で探してくる |
+| 0:23 | 資料は一番奥の保管庫にある |
+| 0:29 | 奪った瞬間、施設が起きる（交戦） |
+| 0:37 | 出口は二つ。南の門か、来た配管か |
+| 0:44 | エンドカード |
+
+YouTube に上げるときの設定:
+
+- タイトル: `AGENT 64 — FACILITY / ブラウザで遊べる N64 風の潜入 FPS`
+- 説明欄: itch.io のページ URL を1行目に置く
+- 公開範囲: **限定公開ではなく「公開」**（限定公開だと itch.io に埋め込めない）
+
+作り直したいときは `trailer-recorder.js` のヘッダに手順がある。カット割り・字幕は
+そのファイルの `TR.shots` を書き換えれば変えられる。
+
+---
+
+## 7. 公開
 
 保存した時点では **Draft**。`Visibility & access` を **Public** にして初めて公開される。
 公開前に `View page` でブラウザ実行を確認しておくとよい。
