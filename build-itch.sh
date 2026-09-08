@@ -18,6 +18,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 cp -R "$ROOT/$GAME/." "$STAGE/"
 rm -f "$STAGE"/*.md
+rm -rf "$STAGE/store"          # storefront copy and screenshots are not part of the game
 
 python3 - "$STAGE/index.html" "$ROOT/vendor" <<'PY'
 import os, re, sys

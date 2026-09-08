@@ -30,6 +30,9 @@ python3 -m http.server 8712
 | Fullscreen button | 有効にする |
 | Mobile friendly | 無効（キーボード＋マウス前提） |
 
+ストアページ用の文言と画像は `<game>/store/` に置いてある（`itch-store-page.md` に
+全欄の入稿内容、カバー 630x500 とスクリーンショット 960x600）。zip には含まれない。
+
 zip は index.html 1枚で完結している。テクスチャも音も手続き的に生成しているうえ、
 three.js も `vendor/` からビルド時に埋め込まれるので、**外部リクエストはゼロ**。
 CDN が塞がれた回線でもオフラインでも動く（検証済み: 読み込み時のリクエストは HTML 1件のみ）。
