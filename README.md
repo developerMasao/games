@@ -30,8 +30,21 @@ python3 -m http.server 8712
 | Fullscreen button | 有効にする |
 | Mobile friendly | 無効（キーボード＋マウス前提） |
 
-zip は index.html 1枚で完結している（テクスチャも音も手続き的に生成）。
-唯一の外部依存は three.js の CDN で、itch.io の iframe から問題なく読める。
+zip は index.html 1枚で完結している。テクスチャも音も手続き的に生成しているうえ、
+three.js も `vendor/` からビルド時に埋め込まれるので、**外部リクエストはゼロ**。
+CDN が塞がれた回線でもオフラインでも動く（検証済み: 読み込み時のリクエストは HTML 1件のみ）。
+
+開発中の `agent64-facility/index.html` は CDN 参照のまま残してある（編集しやすさのため）。
+埋め込みはビルド時にだけ行われ、ゲーム側のコードには一切手を触れない
+（ビルド前後でスクリプトブロックの SHA が一致することを確認している）。
+
+### vendor/
+
+| ファイル | 用途 | ライセンス |
+| --- | --- | --- |
+| `three.r128.min.js` | 3D 描画。`agent64-facility` が参照している CDN と同一の r128 | MIT (Three.js Authors) |
+
+ライセンスヘッダは最小化ファイルの先頭にあり、埋め込み後もそのまま残る。
 
 ## 方針
 
