@@ -5,6 +5,7 @@ Claude Code と一緒に作っているゲーム置き場。1作 = 1ディレク
 | 作品 | 内容 | 遊ぶ |
 | --- | --- | --- |
 | [agent64-facility](agent64-facility/) | GoldenEye 007 (N64) 風の潜入 FPS。1面完結。three.js、単一 HTML、外部アセットなし | [プレイ](https://developerMasao.github.io/games/agent64-facility/) |
+| [jet-board-rush](jet-board-rush/) | ジェットボードで雪山を滑り抜けるオートスクロール横スクロールアクション。1プレイ85秒。スマホ（横向き）対応 | [プレイ](https://developerMasao.github.io/games/jet-board-rush/) |
 
 ## 遊び方（ローカル）
 
@@ -12,7 +13,7 @@ Claude Code と一緒に作っているゲーム置き場。1作 = 1ディレク
 python3 -m http.server 8712
 ```
 
-`http://localhost:8712/agent64-facility/` を開く。
+`http://localhost:8712/agent64-facility/` や `http://localhost:8712/jet-board-rush/` を開く。
 
 ## itch.io に出す
 
@@ -28,7 +29,7 @@ python3 -m http.server 8712
 | Uploads | zip をアップロードし **「This file will be played in the browser」にチェック** |
 | Viewport dimensions | **960 x 600**（内部解像度 320x200 のちょうど3倍） |
 | Fullscreen button | 有効にする |
-| Mobile friendly | 無効（キーボード＋マウス前提） |
+| Mobile friendly | 無効（キーボード＋マウス前提。`jet-board-rush` は**有効**にする — タッチ操作対応） |
 
 ストアページ用の文言と画像は `<game>/store/` に置いてある（`itch-store-page.md` に
 全欄の入稿内容、カバー 630x500 とスクリーンショット 960x600）。zip には含まれない。
