@@ -33,7 +33,9 @@
   #coins{font-size:clamp(15px,3.4vh,22px);color:#ffe9a8;}
   #coins small{font-size:.62em;opacity:.75;margin-right:.25em;color:#fff;}
   #spd{font-size:clamp(12px,2.6vh,17px);color:#a8dcff;opacity:.9;text-align:right;}
-  #spd b{font-size:1.35em;color:#eaffff;}
+  #spd b{font-size:1.35em;color:#eaffff;transition:color .2s,text-shadow .2s;}
+  #spd.hot b{color:#ffe37a;text-shadow:0 0 14px rgba(255,200,60,.9);}
+  #spd.hot{color:#ffd166;}
 
   /* ---- 中央ヒント（アイコンだけ。文字は最小限） ---- */
   #pop{position:fixed;left:50%;top:16%;transform:translateX(-50%);z-index:13;pointer-events:none;
@@ -239,9 +241,17 @@ const P = {
   viewWFast : 38,
   fov       : 34,
   fovFast   : 41,
-  slopeGain : 1.7,     // 坂が速度に効く強さ
-  slopeMin  : 0.74,    // 上りでの下限
-  slopeMax  : 1.42,    // 下りでの上限
+  slopeGain : 1.1,     // 坂にいる「あいだ」だけ効く倍率
+  slopeMin  : 0.80,    // 上りでの下限
+  slopeMax  : 1.30,    // 下りでの上限
+  /* --- 勢い：坂で稼いだぶんは平地でもほとんど減らない --- */
+  boostGain : 4.5,     // 坂で貯まる速さ
+  boostDecay: 0.30,    // 平地での自然減衰（毎秒 m/s）
+  boostBrake: 3.2,     // ブレーキ中の追加減衰。減速は稼いだ勢いを捨てる行為
+  boostHit  : 2.5,     // 被弾で失う量
+  boostMax  : 7.0,
+  boostMin  : -2.0,
+  speedCap  : 27,
   nearMiss  : 0.62,    // これ以内をかすめたらニアミス
   nearPts   : 40
 };
@@ -252,51 +262,49 @@ const P = {
    これを並べ替えるだけでコースを量産できる。                            */
 const CHUNKS = {
   /* ---- 導入 8秒。3つの操作を1回ずつ、間延びさせずに教える ---- */
-  teach: {len:100, terrain:[[62,0],['gap',5],[33,0]], ents:[
-    {t:'hint',x:5,icon:'jump'},  {t:'block',x:20,h:1.5,w:1.4},
-    {t:'coins',x:15,y:1.7,n:5,dx:2.6,arc:1.6},
-    {t:'hint',x:31,icon:'duck'}, {t:'low',x:46,w:4,y:1.30},
-    {t:'coins',x:42,y:0.65,n:4,dx:2.6},
-    {t:'coins',x:60,y:2.0,n:4,dx:2.8,arc:1.4},
-    {t:'block',x:80,h:1.4,w:1.4},{t:'coin',x:80,y:2.8}]},
+  teach: {len:84, terrain:[[54,0],['gap',5],[25,0]], ents:[
+    {t:'hint',x:4,icon:'jump'},  {t:'block',x:18,h:1.5,w:1.4},
+    {t:'coins',x:13,y:1.7,n:5,dx:2.6,arc:1.6},
+    {t:'hint',x:28,icon:'duck'}, {t:'low',x:42,w:4,y:1.30},
+    {t:'coins',x:38,y:0.65,n:4,dx:2.6},
+    {t:'coins',x:52,y:2.0,n:4,dx:2.8,arc:1.4},
+    {t:'block',x:72,h:1.4,w:1.4},{t:'coin',x:72,y:2.8}]},
 
   /* ---- 波1：下って加速 → 飛び石3連（まだ低速なので刻める） ---- */
-  w1_drop: {len:150, terrain:[[18,0],[22,-5],[8,0],['gap',6],[12,0],['gap',6],[12,0],['gap',6],[14,0],[46,0]],
+  w1_drop: {len:134, terrain:[[18,0],[22,-5],[8,0],['gap',6],[12,0],['gap',6],[12,0],['gap',6],[14,0],[30,0]],
     ents:[
     {t:'low',x:12,w:4,y:1.30},{t:'coins',x:8,y:0.65,n:3,dx:2.6},
     {t:'block',x:30,h:1.5,w:1.4},{t:'coin',x:30,y:2.7},
     {t:'coin',x:51,y:1.8},{t:'coin',x:69,y:1.8},{t:'coin',x:87,y:1.8},
-    {t:'low',x:118,w:4,y:1.30},{t:'coins',x:114,y:0.65,n:3,dx:2.6},
-    {t:'block',x:136,h:1.6,w:1.5},{t:'coins',x:143,y:1.6,n:3,dx:2.8}]},
+    {t:'low',x:110,w:4,y:1.30},{t:'coins',x:106,y:0.65,n:3,dx:2.6},
+    {t:'block',x:124,h:1.6,w:1.5},{t:'coins',x:130,y:1.6,n:2,dx:2.8}]},
 
   /* ---- 波2：くぐり連打。伏せ→伏せ→跳ぶ を 14〜24m 刻みで ---- */
-  w2_duck: {len:150, terrain:[[22,-4],[128,0]], ents:[
+  w2_duck: {len:132, terrain:[[22,-4],[110,0]], ents:[
     {t:'low',x:18,w:4,y:1.30},
     {t:'block',x:42,h:1.6,w:1.5},
     {t:'low',x:66,w:4,y:1.30},
     {t:'low',x:80,w:4,y:1.30},
     {t:'block',x:94,h:1.7,w:1.5},
     {t:'low',x:118,w:4,y:1.30},
-    {t:'enemy',x:134,kind:'flyer',y:1.6},
     {t:'coins',x:22,y:0.65,n:3,dx:2.6},{t:'coins',x:70,y:0.65,n:4,dx:2.6},
     {t:'coin',x:42,y:2.9},{t:'coin',x:94,y:3.0},
     {t:'wear',x:106,y:2.0}]},
 
   /* ---- 波3：氷結。ブレーキが効かないまま密集地帯へ ---- */
-  w3_ice: {len:150, terrain:[[26,-4],[78,0],['gap',8],[38,0]], ents:[
+  w3_ice: {len:134, terrain:[[26,-4],[78,0],['gap',8],[22,0]], ents:[
     {t:'sign',x:4}, {t:'hint',x:6,icon:'brake'}, {t:'ice',x:18,w:92},
     {t:'low',x:20,w:4,y:1.30},
     {t:'low',x:34,w:4,y:1.30},
     {t:'low',x:48,w:4,y:1.30},
     {t:'block',x:62,h:1.6,w:1.5},
     {t:'low',x:86,w:4,y:1.30},
-    {t:'enemy',x:136,kind:'flyer',y:1.6},
+    {t:'enemy',x:128,kind:'flyer',y:1.6},
     {t:'coins',x:38,y:0.65,n:4,dx:2.6},{t:'coin',x:62,y:2.9},
-    {t:'coins',x:100,y:2.0,n:3,dx:2.8,arc:1.2},
-    {t:'coins',x:120,y:0.65,n:3,dx:2.8}]},
+    {t:'coins',x:100,y:2.0,n:3,dx:2.8,arc:1.2}]},
 
   /* ---- 波4：ジャンプ台。坂を駆け上がって大穴を跳ぶ（この面の見せ場） ---- */
-  w4_launch: {len:173, terrain:[[20,0],[16,4.5],[6,0],['gap',12,-3],[22,-2],[24,0],['gap',9],[16,0],[48,0]],
+  w4_launch: {len:161, terrain:[[20,0],[16,4.5],[6,0],['gap',12,-3],[22,-2],[24,0],['gap',9],[16,0],[36,0]],
     ents:[
     {t:'low',x:14,w:4,y:1.30},{t:'coins',x:6,y:0.65,n:3,dx:2.6},
     {t:'coin',x:44,y:3.4},{t:'coin',x:48,y:4.2},{t:'coin',x:52,y:3.4},   // 飛距離の目印
@@ -304,40 +312,58 @@ const CHUNKS = {
     {t:'coin',x:72,y:3.0},
     {t:'low',x:130,w:4,y:1.30},
     {t:'low',x:144,w:4,y:1.30},{t:'coins',x:134,y:0.65,n:4,dx:2.6},
-    {t:'enemy',x:162,kind:'flyer',y:1.6},
+    {t:'enemy',x:156,kind:'flyer',y:1.6},
     {t:'coins',x:116,y:1.8,n:3,dx:2.8}]},
 
-  /* ---- 波5：最高速の総まとめ ---- */
-  w5_final: {len:160, terrain:[[18,-4],[104,0],['gap',10],[28,0]], ents:[
+  /* ---- 波5：落ち着き。障害物は少なく、代わりに「落ちる道」を用意する ----
+     踏み切り坂から跳ぶと空中のレールに乗れる。上は結晶だらけ、下は柱がある。
+     レールから落ちても死なず、下の道に降りるだけ（結晶を逃すだけ）。
+     最後の 58m の下り坂で一気に勢いを稼ぎ、そのまま最終区間へ突っ込む。 */
+  w5_rail: {len:172, terrain:[[16,0],[10,2.8],[8,0],[6,-2.8],[74,0],[58,-15]], ents:[
+    {t:'coins',x:6,y:1.6,n:3,dx:2.8},
+    /* 踏み切り場からレールへ弧を描く結晶。これがそのまま跳び方の見本になる */
+    {t:'coin',x:30,y:1.4},{t:'coin',x:34,y:2.6},{t:'coin',x:38,y:4.0},
+    {t:'coin',x:42,y:4.8},{t:'coin',x:46,y:4.6},
+    {t:'plat',x:50,w:20,y:3.6},{t:'plat',x:68,w:14,y:3.6},
+    {t:'plat',x:84,w:14,y:3.6},{t:'plat',x:100,w:14,y:3.6},
+    {t:'coins',x:50,y:4.6,n:4,dx:2.9},{t:'coins',x:64,y:4.6,n:4,dx:2.9},
+    {t:'coins',x:80,y:4.6,n:4,dx:2.9},{t:'coins',x:96,y:4.6,n:4,dx:2.9},
+    {t:'block',x:58,h:1.5,w:1.4},{t:'block',x:88,h:1.5,w:1.4},   // 下の道
+    {t:'wear',x:112,y:2.0},
+    {t:'coins',x:124,y:1.5,n:4,dx:3.4},{t:'coins',x:148,y:1.5,n:4,dx:3.4}]},
+
+  /* ---- 最終区間：稼いだ勢いを維持したまま、密度を最大にする ---- */
+  storm: {len:178, terrain:[[62,0],['gap',10],[46,0],['gap',9],[51,0]], ents:[
+    {t:'gate',x:2},
     {t:'low',x:16,w:4,y:1.30},
-    {t:'low',x:30,w:4,y:1.30},
-    {t:'low',x:44,w:4,y:1.30},
-    {t:'enemy',x:62,kind:'slider'},
-    {t:'low',x:86,w:4,y:1.30},
-    {t:'enemy',x:100,kind:'flyer',y:1.6},
-    {t:'low',x:148,w:4,y:1.30},
-    {t:'coins',x:34,y:0.65,n:4,dx:2.6},{t:'coin',x:62,y:3.0},
-    {t:'coins',x:90,y:0.65,n:3,dx:2.6},
-    {t:'coins',x:128,y:2.0,n:4,dx:2.8,arc:1.4}]},
+    {t:'low',x:32,w:4,y:1.30},
+    {t:'low',x:48,w:4,y:1.30},
+    {t:'low',x:92,w:4,y:1.30},
+    {t:'low',x:104,w:4,y:1.30},
+    {t:'enemy',x:150,kind:'flyer',y:1.6},
+    {t:'coins',x:20,y:0.65,n:4,dx:2.8},{t:'coins',x:96,y:0.65,n:4,dx:2.8},
+    {t:'coin',x:65,y:2.2},{t:'coin',x:69,y:2.8},{t:'coin',x:73,y:2.2},
+    {t:'coin',x:122,y:2.2},{t:'coin',x:126,y:2.6},
+    {t:'coin',x:162,y:2.2},{t:'coin',x:166,y:2.6}]},
 
   /* ---- ゴール ---- */
-  goal: {len:52, terrain:[[20,-3],[32,0]], ents:[
-    {t:'coins',x:6,y:1.7,n:5,dx:3.0},{t:'goal',x:30}]}
+  goal: {len:64, terrain:[[24,-3],[40,0]], ents:[
+    {t:'coins',x:10,y:1.7,n:5,dx:3.0},{t:'goal',x:40}]}
 };
 
 /* ============================================================== ステージ */
 const STAGES = [{
   id:'winter-01', climate:'winter', name:'FROST RIDGE',
   /* 進行度(0..1) → 速度(m/s)。坂はこのカーブに一時的な倍率として乗る */
-  speed:[[0,12.0],[0.12,13.5],[0.30,15.5],[0.50,17.0],[0.70,18.5],[0.85,20.0],[1,21.5]],
-  seq:['teach','w1_drop','w2_duck','w3_ice','w4_launch','w5_final','goal']
+  speed:[[0,13.0],[0.12,14.3],[0.30,15.8],[0.50,16.6],[0.68,17.0],[0.80,17.4],[0.87,19.2],[1,20.2]],
+  seq:['teach','w1_drop','w2_duck','w3_ice','w4_launch','w5_rail','storm','goal']
 }];
 
 /* ステージ展開：部品を並べて絶対座標のワールドデータにする */
 function compile(stage){
   const W = { id:stage.id, name:stage.name, climate:stage.climate, speed:stage.speed,
               length:0, surfaces:[], hazards:[], items:[], enemies:[], ices:[],
-              hints:[], signs:[], goalX:0, endY:0 };
+              hints:[], signs:[], gates:[], goalX:0, endY:0 };
   let ox = 0, oy = 0;                       // 部品の開始位置と、その時点の地面の高さ
   for(const name of stage.seq){
     const c = CHUNKS[name];
@@ -400,6 +426,7 @@ function compile(stage){
         case 'wear': W.items.push({type:'wear', x:x, y:base+(e.y||2.0), got:false}); break;
         case 'hint': W.hints.push({x:x, icon:e.icon, fired:false}); break;
         case 'sign': W.signs.push({x:x, y:base}); break;
+        case 'gate': W.gates.push({x:x, y:base, fired:false}); break;
         case 'goal': W.goalX = x; W.goalY = base; break;
       }
     }
@@ -695,6 +722,20 @@ function buildStaticWorld(W){
     gb.box(s.x, b+2.9, 4.09, 1.3, 0.62, 0.06, 0x1b2b3f, {top:0x1b2b3f, shZ:1.05});
     for(let i=0;i<3;i++) gb.box(s.x-0.40+i*0.40, b+2.9, 4.14, 0.20, 0.46, 0.05, 0xffd23f, {shZ:1.1});
   }
+  /* --- 最終区間のゲート（くぐるだけ。当たり判定は無い） --- */
+  for(const g of W.gates){
+    const gb = at(g.x), b = g.y;
+    for(const zz of [-5.0, 5.0]){
+      gb.taper(g.x, b, zz, 1.6, 1.6, 1.1, 1.1, 8.4, CL.arch.edge, {top:CL.ground.top});
+      gb.spike(g.x, b+8.4, zz, 1.4, 1.6, CL.block.tip);
+    }
+    gb.box(g.x, b+8.0, 0, 1.2, 1.0, 10.6, CL.arch.edge, {top:CL.ground.top});
+    for(let i=0;i<9;i++)
+      gb.icicle(g.x, b+7.5, -4.4+i*1.1, 0.34, 1.0+((i*7)%5)*0.28, CL.arch.main);
+    for(let i=0;i<6;i++)
+      gb.box(g.x+0.65, b+8.0, -4.4+i*1.8, 0.10, 0.9, 1.5, i%2?0xffd23f:0xe8503f,
+             {shZ:1.05, top:i%2?0xffd23f:0xe8503f});
+  }
   /* --- ゴール --- */
   if(W.goalX){
     const gb = at(W.goalX), gx = W.goalX, GC = CL.goal, gy0 = W.goalY||0;
@@ -775,11 +816,12 @@ function buildFar(){
     farLayers.push({meshes:set, f:d.f, w:d.w});
   });
 }
-function updateFar(camX){
+function updateFar(camX, camY){
   for(const L of farLayers){
     const base = camX*(1-L.f);
     const k = Math.round(camX*L.f/L.w);
-    L.meshes.forEach((m,i)=>{ m.position.x = base + (k+i-1)*L.w; });
+    const dy = (camY-4.5)*(1-L.f);      // 遠いほどカメラに合わせて動く＝画面上で止まって見える
+    L.meshes.forEach((m,i)=>{ m.position.x = base + (k+i-1)*L.w; m.position.y = dy; });
   }
 }
 
@@ -1175,6 +1217,9 @@ const Sound = {
   jump(){ this.tone(320, 0.16, 'square', 0.22, 760); this.burst(0.12, 0.16, 1600); },
   land(){ this.burst(0.16, 0.22, 700); },
   launch(){ this.tone(180, 0.28, 'sawtooth', 0.22, 620); this.burst(0.22, 0.3, 1200); },
+  gate(){ if(!this.ready||!this.on) return; const t=this.ctx.currentTime;
+          [330,440,554,660].forEach((f,i)=> this.tone(f, 0.5, 'sawtooth', 0.20, f*1.5, t+i*0.05));
+          this.burst(0.6, 0.32, 2600); },
   near(){ this.burst(0.13, 0.30, 5200); this.tone(1900, 0.07, 'sine', 0.10, 2600); },
   coin(){ const t=this.ready?this.ctx.currentTime:0;
           this.tone(1180, 0.07,'square',0.18,null,t); this.tone(1760,0.12,'square',0.16,null,t+0.06); },
@@ -1283,12 +1328,14 @@ const G = {
   coyote:0, jumpCut:false, crouching:false, clothes:true, invuln:0, hitT:0,
   coins:0, dmg:0, timeMs:0, dist:0, shake:0, camY:5, deadT:0, clearT:0,
   brakeAmt:0, iceOn:false, faceY:0, hintT:0, blinkT:0,
-  groundSlope:0, camDip:0, near:0, popT:0, lastY:0, airT:0, rampT:0, rampM:0
+  groundSlope:0, camDip:0, near:0, popT:0, lastY:0, airT:0, rampT:0, rampM:0,
+  boost:0, chain:0, chainT:0, gateT:0, rush:false
 };
 
 const el = id => document.getElementById(id);
 const UI = {
   hud:el('hud'), bar:el('barFill'), barIcon:el('barIcon'), coin:el('coinNum'), spd:el('spdNum'),
+  spdBox:el('spd'),
   title:el('title'), result:el('result'), hint:el('hint'), hintGlyph:el('hintGlyph'), hintCap:el('hintCap'),
   pop:el('pop'), flash:el('flash'), rtitle:el('resultTitle'), rsub:el('resultSub'), sheet:el('sheet'),
   total:el('totalNum'), newbest:el('newbest'), titleBest:el('titleBest'), resultBest:el('resultBest'),
@@ -1328,6 +1375,8 @@ function resetRun(state){
   G.crouching=false; G.clothes=true; G.invuln=0; G.hitT=0; G.coins=0; G.dmg=0;
   G.timeMs=0; G.dist=0; G.shake=0; G.deadT=0; G.clearT=0; G.brakeAmt=0; G.faceY=0;
   G.groundSlope=0; G.camDip=0; G.near=0; G.popT=0; G.lastY=0; G.airT=0; G.rampT=0; G.rampM=0;
+  G.boost=0; G.chain=0; G.chainT=0; G.gateT=0; G.rush=false;
+  for(const g of world.gates) g.fired=false;
   for(const h of world.hazards) h._clr = null;
   for(const e of world.enemies) e._clr = null;
   for(const it of world.items){ it.got=false; if(it.mesh) it.mesh.visible=true; }
@@ -1367,11 +1416,13 @@ addEventListener('visibilitychange', ()=>{ if(document.hidden && G.state==='PLAY
    ぎりぎりで抜けたら得点。危ない通り方が損ではなく得になるようにする。 */
 function nearMiss(x, y){
   if(G.state!=='PLAY' || G.invuln>0) return;
-  G.near++;
+  G.chain = G.chainT > 0 ? Math.min(G.chain+1, 5) : 1;
+  G.chainT = 2.0;
+  G.near += G.chain;                     // 連続でかすめるほど1回の価値が上がる
   emitSpark(x, y);
   Sound.near();
-  UI.pop.textContent = '+'+P.nearPts;
-  G.popT = 0.6;
+  UI.pop.textContent = '+'+(P.nearPts*G.chain) + (G.chain>1 ? ' ×'+G.chain : '');
+  G.popT = 0.7;
 }
 
 /* --------------------------------------------------------- 被弾・死亡 */
@@ -1385,6 +1436,7 @@ function hurt(){
     for(const c of rider.userData.clothes) c.visible = false;
     emitDebris(G.px, G.py+1.0, 0);
     G.invuln = P.invuln; G.hitT = P.hitTime; G.shake = 0.55;
+    G.boost = Math.max(P.boostMin, G.boost - P.boostHit);
     flash(0.45); Sound.hurt();
   }else{
     die();
@@ -1447,6 +1499,17 @@ function terrainY(x){
     if(s.kind==='ground' && x>=s.x0 && x<=s.x1) return surfY(s, x);
   return null;
 }
+/* 踏み切り坂の効果。跳んだ勢いに坂ぶんを上乗せする（1回の踏み切りにつき1度だけ） */
+function rampBoost(){
+  if(G.rampT <= 0) return;
+  const boost = Math.min(G.speed*G.rampM*0.95, 12);
+  G.vy = Math.min(G.vy + boost, 21);
+  G.rampT = 0;
+  if(boost > 3.0){
+    emitSpray(G.px-0.4, G.py, 0, 16, 4, 3.4);
+    Sound.launch(); G.shake = Math.max(G.shake, 0.28);
+  }
+}
 function stepPlay(dt){
   G.crouching = IN.crouch;
   const h = G.crouching ? P.crouchH : P.standH;
@@ -1462,8 +1525,16 @@ function stepPlay(dt){
     target *= bf;
   }
   if(G.hitT>0) target *= P.hitMul;
-  /* 坂：下りで伸び、上りで削れる。基準のカーブからの一時的なずれとして効かせる */
+  /* 坂にいるあいだの倍率（その場の伸び） */
   if(G.onGround && G.groundSlope) target *= clamp(1 - G.groundSlope*P.slopeGain, P.slopeMin, P.slopeMax);
+  /* 勢い：下りで貯まり、上りで減り、平地ではほとんど減らない。
+     ブレーキは「稼いだ勢いを捨てる」ので、速さと引き換えの操作になる */
+  if(G.onGround && G.groundSlope < -0.02)      G.boost += (-G.groundSlope)*P.boostGain*(G.speed/15)*dt;
+  else if(G.onGround && G.groundSlope > 0.02)  G.boost -= ( G.groundSlope)*P.boostGain*(G.speed/15)*dt;
+  else if(G.boost)                             G.boost -= Math.sign(G.boost)*Math.min(Math.abs(G.boost), P.boostDecay*dt);
+  if(IN.brake) G.boost -= P.boostBrake*dt;
+  G.boost = clamp(G.boost, P.boostMin, P.boostMax);
+  target = Math.min(target + G.boost, P.speedCap);
   const k = target < G.speed ? 4.2 : 2.0;
   G.speed += (target-G.speed)*(1-Math.exp(-k*dt));
   G.px += G.speed*dt;
@@ -1473,6 +1544,7 @@ function stepPlay(dt){
   if(IN.jumpBuf>0 && (G.onGround || G.coyote>0)){
     G.vy = P.jumpV; G.onGround=false; G.coyote=0; IN.jumpBuf=0; G.jumpCut=false;
     Sound.jump(); emitSpray(G.px-0.4, G.py+0.1, 0, 8, 3, 2.2);
+    rampBoost();                      // 踏み切り坂の上（を離れた直後まで）なら大きく飛ぶ
   }
   if(!G.jumpCut && G.vy>0 && !IN.jumpHeld){ G.vy *= P.cutJump; G.jumpCut = true; }
   const prevFeet = G.py, wasGround = G.onGround, jumped = G.vy > 0.001;
@@ -1496,18 +1568,13 @@ function stepPlay(dt){
     }
     G.py = sup.y; G.vy = 0; G.onGround = true; G.coyote = P.coyote; G.jumpCut = false;
     G.groundSlope = surfSlope(sup.s); G.lastY = sup.y; G.airT = 0;
-    if(G.groundSlope > 0.12){ G.rampT = 0.32; G.rampM = G.groundSlope; }
+    if(G.groundSlope > 0.12){ G.rampT = 0.50; G.rampM = G.groundSlope; }
     else G.rampT = Math.max(0, G.rampT - dt);
   }else{
     G.airT += dt;
     if(wasGround){
       G.onGround = false; G.coyote = P.coyote;
-      /* 上り坂（を離れた直後まで）はジャンプ台。跳んだ勢いに坂ぶんが上乗せされる */
-      if(G.rampT > 0){
-        const boost = Math.min(G.speed*G.rampM*0.95, 12);
-        G.vy = Math.min(G.vy + boost, 20);
-        if(boost > 3.5){ emitSpray(G.px-0.4, G.py, 0, 16, 4, 3.4); Sound.launch(); G.shake = Math.max(G.shake, 0.28); }
-      }
+      rampBoost();                    // 跳ばずに坂の先端から飛び出した場合
     }
     G.coyote -= dt;
   }
@@ -1567,6 +1634,13 @@ function stepPlay(dt){
       if(it.mesh) it.mesh.visible=false;
     }
   }
+  /* --- 最終区間に入った合図 --- */
+  for(const g of world.gates){
+    if(!g.fired && G.px > g.x){
+      g.fired = true; G.rush = true; G.gateT = 0.5;
+      G.shake = Math.max(G.shake, 0.5); flash(0.30); Sound.gate();
+    }
+  }
   /* --- ヒント --- */
   if(G.state==='PLAY') for(const hint of world.hints){
     if(!hint.fired && G.px > hint.x){ hint.fired=true; showHint(hint.icon); }
@@ -1575,6 +1649,7 @@ function stepPlay(dt){
   if(G.state==='PLAY') G.timeMs += dt*1000;
   if(G.invuln>0) G.invuln -= dt;
   if(G.hitT>0) G.hitT -= dt;
+  if(G.chainT>0) G.chainT -= dt;
   if(IN.jumpBuf>0) IN.jumpBuf -= dt;
   if(G.px >= world.goalX) finish();
 }
@@ -1746,7 +1821,10 @@ function updateHUD(){
   UI.bar.style.width = p+'%';
   UI.barIcon.style.left = p+'%';
   UI.coin.textContent = G.coins;
-  if((hudTick++ & 3)===0) UI.spd.textContent = Math.round(G.speed*7.5);
+  if((hudTick++ & 3)===0){
+    UI.spd.textContent = Math.round(G.speed*7.5);
+    UI.spdBox.classList.toggle('hot', G.boost > 1.2);
+  }
 }
 
 /* ============================================================= カメラ */
@@ -1770,7 +1848,7 @@ function updateCamera(dt){
   const cx = G.px + P.camLead;
   camera.position.set(cx+sx, G.camY - G.camDip + sy, dist);
   camera.lookAt(cx+sx, G.camY-1.05+sy, 0);
-  updateFar(cx);
+  updateFar(cx, G.camY);
   recycleForeground(cx, G.camY, sk);
   return cx;
 }
@@ -1829,7 +1907,7 @@ function frame(now){
   if(G.state==='PLAY' && !G.paused){
     updateHUD();
     Sound.speed(G.speed, IN.brake);
-    Sound.update(clamp(G.px/world.length,0,1));
+    Sound.update(G.rush ? 1 : clamp(G.px/world.length, 0, 0.85));
   }else if(G.state==='TITLE'){
     Sound.speed(6, false);
   }
