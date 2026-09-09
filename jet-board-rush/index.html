@@ -36,6 +36,9 @@
   #spd b{font-size:1.35em;color:#eaffff;}
 
   /* ---- 中央ヒント（アイコンだけ。文字は最小限） ---- */
+  #pop{position:fixed;left:50%;top:16%;transform:translateX(-50%);z-index:13;pointer-events:none;
+       font-weight:900;font-size:clamp(16px,3.6vh,26px);letter-spacing:.12em;color:#9ff0ff;opacity:0;
+       text-shadow:0 0 16px rgba(120,230,255,.9),0 2px 6px rgba(0,20,40,.7);}
   #hint{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:12;
         pointer-events:none;opacity:0;transition:opacity .28s;text-align:center;}
   #hint .glyph{font-size:clamp(46px,13vh,96px);line-height:1;font-weight:900;color:#fff;
@@ -120,6 +123,7 @@
   </div>
 </div>
 
+<div id="pop"></div>
 <div id="hint"><div class="glyph" id="hintGlyph">▲</div><div class="cap" id="hintCap"></div></div>
 
 <div id="title" class="screen">
@@ -229,9 +233,17 @@ const P = {
   hitMul    : 0.72,     // 被弾直後の失速
   hitTime   : 0.55,
   invuln    : 1.5,
-  fallY     : -9,
+  fallDrop  : 12,     // 直前の接地面からこれだけ落ちたらミス
   camLead   : 8.2,
-  viewW     : 33
+  viewW     : 33,      // 画面に映るコースの横幅(m)。速度で少し広がる
+  viewWFast : 38,
+  fov       : 34,
+  fovFast   : 41,
+  slopeGain : 1.7,     // 坂が速度に効く強さ
+  slopeMin  : 0.74,    // 上りでの下限
+  slopeMax  : 1.42,    // 下りでの上限
+  nearMiss  : 0.62,    // これ以内をかすめたらニアミス
+  nearPts   : 40
 };
 
 /* ======================================================= ステージ部品集
@@ -239,162 +251,186 @@ const P = {
    t: block(柱/氷塊) low(くぐる) plat(足場) enemy coin coins wear ice hint sign
    これを並べ替えるだけでコースを量産できる。                            */
 const CHUNKS = {
-  open:      {len:40, ents:[{t:'coins',x:14,y:1.7,n:5,dx:3.2}]},
+  /* ---- 導入 8秒。3つの操作を1回ずつ、間延びさせずに教える ---- */
+  teach: {len:100, terrain:[[62,0],['gap',5],[33,0]], ents:[
+    {t:'hint',x:5,icon:'jump'},  {t:'block',x:20,h:1.5,w:1.4},
+    {t:'coins',x:15,y:1.7,n:5,dx:2.6,arc:1.6},
+    {t:'hint',x:31,icon:'duck'}, {t:'low',x:46,w:4,y:1.30},
+    {t:'coins',x:42,y:0.65,n:4,dx:2.6},
+    {t:'coins',x:60,y:2.0,n:4,dx:2.8,arc:1.4},
+    {t:'block',x:80,h:1.4,w:1.4},{t:'coin',x:80,y:2.8}]},
 
-  t_jump:    {len:44, ents:[{t:'hint',x:9,icon:'jump'},
-                            {t:'block',x:24,h:1.5,w:1.5},
-                            {t:'coins',x:19,y:1.6,n:5,dx:2.6,arc:2.0}]},
+  /* ---- 波1：下って加速 → 飛び石3連（まだ低速なので刻める） ---- */
+  w1_drop: {len:150, terrain:[[18,0],[22,-5],[8,0],['gap',6],[12,0],['gap',6],[12,0],['gap',6],[14,0],[46,0]],
+    ents:[
+    {t:'low',x:12,w:4,y:1.30},{t:'coins',x:8,y:0.65,n:3,dx:2.6},
+    {t:'block',x:30,h:1.5,w:1.4},{t:'coin',x:30,y:2.7},
+    {t:'coin',x:51,y:1.8},{t:'coin',x:69,y:1.8},{t:'coin',x:87,y:1.8},
+    {t:'low',x:118,w:4,y:1.30},{t:'coins',x:114,y:0.65,n:3,dx:2.6},
+    {t:'block',x:136,h:1.6,w:1.5},{t:'coins',x:143,y:1.6,n:3,dx:2.8}]},
 
-  t_gap:     {len:46, gaps:[[21,4.5]], ents:[{t:'coins',x:19,y:1.8,n:5,dx:2.4,arc:1.6}]},
+  /* ---- 波2：くぐり連打。伏せ→伏せ→跳ぶ を 14〜24m 刻みで ---- */
+  w2_duck: {len:150, terrain:[[22,-4],[128,0]], ents:[
+    {t:'low',x:18,w:4,y:1.30},
+    {t:'block',x:42,h:1.6,w:1.5},
+    {t:'low',x:66,w:4,y:1.30},
+    {t:'low',x:80,w:4,y:1.30},
+    {t:'block',x:94,h:1.7,w:1.5},
+    {t:'low',x:118,w:4,y:1.30},
+    {t:'enemy',x:134,kind:'flyer',y:1.6},
+    {t:'coins',x:22,y:0.65,n:3,dx:2.6},{t:'coins',x:70,y:0.65,n:4,dx:2.6},
+    {t:'coin',x:42,y:2.9},{t:'coin',x:94,y:3.0},
+    {t:'wear',x:106,y:2.0}]},
 
-  t_duck:    {len:48, ents:[{t:'hint',x:9,icon:'duck'},
-                            {t:'low',x:24,w:5,y:1.30},
-                            {t:'coins',x:21,y:0.65,n:5,dx:2.6}]},
+  /* ---- 波3：氷結。ブレーキが効かないまま密集地帯へ ---- */
+  w3_ice: {len:150, terrain:[[26,-4],[78,0],['gap',8],[38,0]], ents:[
+    {t:'sign',x:4}, {t:'hint',x:6,icon:'brake'}, {t:'ice',x:18,w:92},
+    {t:'low',x:20,w:4,y:1.30},
+    {t:'low',x:34,w:4,y:1.30},
+    {t:'low',x:48,w:4,y:1.30},
+    {t:'block',x:62,h:1.6,w:1.5},
+    {t:'low',x:86,w:4,y:1.30},
+    {t:'enemy',x:136,kind:'flyer',y:1.6},
+    {t:'coins',x:38,y:0.65,n:4,dx:2.6},{t:'coin',x:62,y:2.9},
+    {t:'coins',x:100,y:2.0,n:3,dx:2.8,arc:1.2},
+    {t:'coins',x:120,y:0.65,n:3,dx:2.8}]},
 
-  breather:  {len:26, ents:[{t:'coins',x:8,y:1.5,n:4,dx:3.0}]},
+  /* ---- 波4：ジャンプ台。坂を駆け上がって大穴を跳ぶ（この面の見せ場） ---- */
+  w4_launch: {len:173, terrain:[[20,0],[16,4.5],[6,0],['gap',12,-3],[22,-2],[24,0],['gap',9],[16,0],[48,0]],
+    ents:[
+    {t:'low',x:14,w:4,y:1.30},{t:'coins',x:6,y:0.65,n:3,dx:2.6},
+    {t:'coin',x:44,y:3.4},{t:'coin',x:48,y:4.2},{t:'coin',x:52,y:3.4},   // 飛距離の目印
+    {t:'enemy',x:72,kind:'slider'},
+    {t:'coin',x:72,y:3.0},
+    {t:'low',x:130,w:4,y:1.30},
+    {t:'low',x:144,w:4,y:1.30},{t:'coins',x:134,y:0.65,n:4,dx:2.6},
+    {t:'enemy',x:162,kind:'flyer',y:1.6},
+    {t:'coins',x:116,y:1.8,n:3,dx:2.8}]},
 
-  stones_a:  {len:64, gaps:[[14,37]], ents:[
-                {t:'plat',x:21.5,w:7,y:0.4},{t:'plat',x:32.5,w:7,y:0.9},{t:'plat',x:43.5,w:7,y:0.4},
-                {t:'coin',x:21.5,y:2.0},{t:'coin',x:32.5,y:2.6},{t:'coin',x:43.5,y:2.0}]},
+  /* ---- 波5：最高速の総まとめ ---- */
+  w5_final: {len:160, terrain:[[18,-4],[104,0],['gap',10],[28,0]], ents:[
+    {t:'low',x:16,w:4,y:1.30},
+    {t:'low',x:30,w:4,y:1.30},
+    {t:'low',x:44,w:4,y:1.30},
+    {t:'enemy',x:62,kind:'slider'},
+    {t:'low',x:86,w:4,y:1.30},
+    {t:'enemy',x:100,kind:'flyer',y:1.6},
+    {t:'low',x:148,w:4,y:1.30},
+    {t:'coins',x:34,y:0.65,n:4,dx:2.6},{t:'coin',x:62,y:3.0},
+    {t:'coins',x:90,y:0.65,n:3,dx:2.6},
+    {t:'coins',x:128,y:2.0,n:4,dx:2.8,arc:1.4}]},
 
-  duck_run:  {len:54, ents:[{t:'low',x:12,w:4,y:1.30},{t:'low',x:32,w:4,y:1.30},
-                            {t:'coins',x:18,y:0.65,n:5,dx:2.6},{t:'block',x:46,h:1.4,w:1.4}]},
-
-  enemy_a:   {len:50, ents:[{t:'enemy',x:28,kind:'slider'},
-                            {t:'coins',x:12,y:1.6,n:3,dx:2.6}]},
-
-  blocks_a:  {len:54, ents:[{t:'block',x:12,h:1.5,w:1.4},{t:'block',x:28,h:1.9,w:1.8},
-                            {t:'block',x:42,h:1.3,w:1.4},{t:'coins',x:24,y:3.1,n:4,dx:2.4,arc:0.8}]},
-
-  ice_a:     {len:68, ents:[{t:'ice',x:6,w:48},{t:'sign',x:2},{t:'hint',x:4,icon:'brake'},
-                            {t:'block',x:26,h:1.8,w:1.6},{t:'low',x:46,w:4,y:1.30},
-                            {t:'coins',x:32,y:1.5,n:4,dx:2.6}]},
-
-  mix_a:     {len:58, gaps:[[24,5.5]], ents:[{t:'low',x:10,w:4,y:1.30},
-                            {t:'block',x:40,h:1.9,w:1.6},{t:'coins',x:22,y:2.2,n:4,dx:2.6,arc:1.4}]},
-
-  wear_a:    {len:32, ents:[{t:'wear',x:15,y:2.0},{t:'coins',x:22,y:1.6,n:3,dx:3.0}]},
-
-  stones_b:  {len:72, gaps:[[12,16],[44,15]], ents:[
-                {t:'plat',x:20,w:9,y:0.8},{t:'plat',x:51.5,w:9,y:0.5},
-                {t:'coin',x:20,y:2.4},{t:'coin',x:51.5,y:2.1},{t:'coins',x:64,y:1.6,n:3,dx:2.6},
-                {t:'coins',x:33,y:1.6,n:3,dx:2.6}]},
-
-  dense_a:   {len:70, gaps:[[40,6]], ents:[{t:'low',x:8,w:4,y:1.30},{t:'block',x:24,h:1.8,w:1.6},
-                            {t:'enemy',x:60,kind:'slider'},
-                            {t:'coins',x:38,y:2.4,n:4,dx:2.6,arc:1.2},{t:'coins',x:14,y:1.6,n:3,dx:2.6}]},
-
-  brake_gate:{len:74, ents:[{t:'sign',x:1},{t:'hint',x:4,icon:'brake'},
-                            {t:'low',x:12,w:4,y:1.30},{t:'block',x:24,h:1.8,w:1.6},
-                            {t:'low',x:36,w:4,y:1.30},{t:'block',x:48,h:1.6,w:1.5},
-                            {t:'low',x:60,w:4,y:1.30},{t:'coins',x:67,y:1.6,n:3,dx:2.6}]},
-
-  enemy_b:   {len:58, ents:[{t:'enemy',x:14,kind:'slider'},{t:'enemy',x:32,kind:'flyer',y:1.6},
-                            {t:'enemy',x:46,kind:'slider'},{t:'coins',x:22,y:1.6,n:3,dx:2.6}]},
-
-  ice_b:     {len:74, gaps:[[26,6]], ents:[{t:'ice',x:4,w:64},{t:'sign',x:0},
-                            {t:'block',x:42,h:1.6,w:1.5},{t:'low',x:58,w:4,y:1.30},
-                            {t:'coins',x:14,y:1.6,n:4,dx:2.8},{t:'coin',x:29,y:2.6}]},
-
-  rest_b:    {len:30, ents:[{t:'wear',x:13,y:2.0},{t:'coins',x:21,y:1.6,n:3,dx:3.0}]},
-
-  dense_b:   {len:86, gaps:[[26,6],[76,7]], ents:[
-                {t:'block',x:8,h:1.5,w:1.4},{t:'low',x:46,w:4,y:1.30},
-                {t:'enemy',x:62,kind:'slider'},
-                {t:'coins',x:24,y:2.2,n:4,dx:2.6,arc:1.2},{t:'coin',x:16,y:1.7},
-                {t:'coins',x:36,y:1.6,n:3,dx:2.6},{t:'coin',x:84,y:1.8}]},
-
-  finale:    {len:92, gaps:[[24,6],[64,7]], ents:[
-                {t:'ice',x:34,w:28},{t:'sign',x:2},
-                {t:'low',x:10,w:4,y:1.30},{t:'block',x:46,h:1.8,w:1.6},
-                {t:'low',x:84,w:4,y:1.30},
-                {t:'coins',x:16,y:2.4,n:4,dx:2.6,arc:1.2},{t:'coin',x:67,y:2.6},
-                {t:'coins',x:54,y:1.6,n:3,dx:2.6},{t:'coin',x:27,y:2.4}]},
-
-  goal:      {len:46, ents:[{t:'coins',x:8,y:1.6,n:6,dx:3.0},{t:'goal',x:32}]}
+  /* ---- ゴール ---- */
+  goal: {len:52, terrain:[[20,-3],[32,0]], ents:[
+    {t:'coins',x:6,y:1.7,n:5,dx:3.0},{t:'goal',x:30}]}
 };
 
 /* ============================================================== ステージ */
 const STAGES = [{
   id:'winter-01', climate:'winter', name:'FROST RIDGE',
-  /* 進行度(0..1) → 速度(m/s)。終盤が最高速になるカーブ */
-  speed:[[0,8.8],[0.16,10.6],[0.34,12.4],[0.52,14.1],[0.70,15.8],[0.86,17.4],[1,19.0]],
-  seq:['open','t_jump','breather','t_gap','t_duck',
-       'stones_a','duck_run','enemy_a','blocks_a','ice_a','mix_a','wear_a',
-       'stones_b','dense_a','brake_gate','enemy_b','ice_b','rest_b','dense_b',
-       'finale','goal']
+  /* 進行度(0..1) → 速度(m/s)。坂はこのカーブに一時的な倍率として乗る */
+  speed:[[0,12.0],[0.12,13.5],[0.30,15.5],[0.50,17.0],[0.70,18.5],[0.85,20.0],[1,21.5]],
+  seq:['teach','w1_drop','w2_duck','w3_ice','w4_launch','w5_final','goal']
 }];
 
 /* ステージ展開：部品を並べて絶対座標のワールドデータにする */
 function compile(stage){
   const W = { id:stage.id, name:stage.name, climate:stage.climate, speed:stage.speed,
               length:0, surfaces:[], hazards:[], items:[], enemies:[], ices:[],
-              hints:[], signs:[], goalX:0 };
-  let ox = 0;
+              hints:[], signs:[], goalX:0, endY:0 };
+  let ox = 0, oy = 0;                       // 部品の開始位置と、その時点の地面の高さ
   for(const name of stage.seq){
     const c = CHUNKS[name];
     if(!c){ console.warn('unknown chunk', name); continue; }
-    /* 地面：穴を引いた残りを床にする */
-    const gaps = (c.gaps||[]).slice().sort((a,b)=>a[0]-b[0]);
-    let cur = 0;
-    for(const g of gaps){
-      if(g[0] > cur) W.surfaces.push({x0:ox+cur, x1:ox+g[0], y:0, kind:'ground'});
-      cur = g[0]+g[1];
+    /* --- 地形：[長さ, 高低差] と ['gap', 幅, 落差] の鎖として持つ --- */
+    const terr = c.terrain || [[c.len, 0]];
+    const segs = [];                        // この部品のローカル地形（当たり判定と配置の基準）
+    let cx = 0, cy = oy;
+    for(const t of terr){
+      if(t[0]==='gap'){
+        const w = t[1], dy = t[2]||0;
+        segs.push({gap:true, x0:cx, x1:cx+w, y0:cy, y1:cy+dy});
+        cx += w; cy += dy;
+      }else{
+        const len = t[0], dy = t[1]||0;
+        const seg = {gap:false, x0:cx, x1:cx+len, y0:cy, y1:cy+dy};
+        segs.push(seg);
+        W.surfaces.push({x0:ox+seg.x0, x1:ox+seg.x1, y:seg.y0, y1:seg.y1, kind:'ground'});
+        cx += len; cy += dy;
+      }
     }
-    if(cur < c.len) W.surfaces.push({x0:ox+cur, x1:ox+c.len, y:0, kind:'ground'});
+    if(Math.abs(cx - c.len) > 0.01) console.warn('terrain length mismatch in', name, cx, c.len);
+    /* 部品内の任意の x における地面の高さ（穴の上は縁の高さを返す） */
+    const gy = x => {
+      for(const g of segs){
+        if(x >= g.x0 && x <= g.x1) return lerp(g.y0, g.y1, (x-g.x0)/Math.max(1e-6,g.x1-g.x0));
+      }
+      return x < 0 ? oy : cy;
+    };
 
+    const gyTop = (x, w) => Math.max(gy(x-w/2), gy(x), gy(x+w/2));
     for(const e of (c.ents||[])){
-      const x = ox + e.x;
+      const x = ox + e.x, base = gy(e.x);
       switch(e.t){
         case 'block':{
-          const w = e.w||1.5, h = e.h||1.6;
-          W.hazards.push({type:'block', x0:x-w/2, x1:x+w/2, y0:0, y1:h-0.22, h:h, w:w, cx:x});
-          W.surfaces.push({x0:x-w/2, x1:x+w/2, y:h, kind:'block'});
+          const w = e.w||1.5, h = e.h||1.6, b = gyTop(e.x, w*1.2);
+          W.hazards.push({type:'block', x0:x-w/2, x1:x+w/2, y0:b, y1:b+h-0.22,
+                          h:h, w:w, cx:x, base:b});
+          W.surfaces.push({x0:x-w/2, x1:x+w/2, y:b+h, y1:b+h, kind:'block'});
           break; }
         case 'low':{
-          const w = e.w||4, y = e.y||1.3;
-          W.hazards.push({type:'low', x0:x-w/2, x1:x+w/2, y0:y, y1:y+3.6, w:w, cx:x, yb:y});
+          const w = e.w||4, b = gyTop(e.x, w+1.2), y = b + (e.y||1.3);
+          W.hazards.push({type:'low', x0:x-w/2, x1:x+w/2, y0:y, y1:y+3.6, w:w, cx:x, yb:y, base:b});
           break; }
         case 'plat':{
-          const w = e.w||6, y = e.y||0.6;
-          W.surfaces.push({x0:x-w/2, x1:x+w/2, y:y, kind:'plat'});
+          const w = e.w||6, y = gyTop(e.x, w) + (e.y||0.6);
+          W.surfaces.push({x0:x-w/2, x1:x+w/2, y:y, y1:y, kind:'plat'});
           break; }
         case 'ice': W.ices.push({x0:x, x1:x+(e.w||20)}); break;
-        case 'enemy': W.enemies.push({kind:e.kind||'slider', x:x, y:e.y||0, alive:true, id:W.enemies.length}); break;
-        case 'coin': W.items.push({type:'coin', x:x, y:e.y||1.6, got:false}); break;
+        case 'enemy': W.enemies.push({kind:e.kind||'slider', x:x, y:base+(e.y||0),
+                                      dy:e.y||0, alive:true, id:W.enemies.length}); break;
+        case 'coin': W.items.push({type:'coin', x:x, y:base+(e.y||1.6), got:false}); break;
         case 'coins':{
           const n=e.n||4, dx=e.dx||2.6, arc=e.arc||0;
           for(let i=0;i<n;i++){
             const t = n>1 ? i/(n-1) : 0.5;
-            W.items.push({type:'coin', x:x+i*dx, y:(e.y||1.6)+ (arc? Math.sin(t*Math.PI)*arc : 0), got:false});
+            W.items.push({type:'coin', x:x+i*dx, y:gy(e.x+i*dx)+(e.y||1.6)+(arc? Math.sin(t*Math.PI)*arc : 0), got:false});
           }
           break; }
-        case 'wear': W.items.push({type:'wear', x:x, y:e.y||2.0, got:false}); break;
+        case 'wear': W.items.push({type:'wear', x:x, y:base+(e.y||2.0), got:false}); break;
         case 'hint': W.hints.push({x:x, icon:e.icon, fired:false}); break;
-        case 'sign': W.signs.push({x:x}); break;
-        case 'goal': W.goalX = x; break;
+        case 'sign': W.signs.push({x:x, y:base}); break;
+        case 'goal': W.goalX = x; W.goalY = base; break;
       }
     }
-    ox += c.len;
+    ox += c.len; oy = cy;
   }
-  /* 部品の境目で地面が分割されたままにならないよう、隣接する床を結合する */
+  /* 部品の境目で地面が分割されたままにならないよう、傾きが同じ隣接面を結合する */
   const grounds = W.surfaces.filter(s=>s.kind==='ground').sort((a,b)=>a.x0-b.x0);
   const others  = W.surfaces.filter(s=>s.kind!=='ground');
   const merged = [];
+  const slope = s => (s.y1-s.y)/(s.x1-s.x0);
   for(const s of grounds){
     const p = merged[merged.length-1];
-    if(p && Math.abs(p.y-s.y)<0.01 && s.x0 <= p.x1+0.01) p.x1 = Math.max(p.x1, s.x1);
-    else merged.push(s);
+    if(p && Math.abs(p.y1-s.y)<0.01 && Math.abs(slope(p)-slope(s))<0.001 && s.x0 <= p.x1+0.01){
+      p.x1 = Math.max(p.x1, s.x1); p.y1 = s.y1;
+    } else merged.push(s);
   }
   W.surfaces = merged.concat(others);
-  W.length = ox;
-  if(!W.goalX) W.goalX = ox - 12;
+  W.length = ox; W.endY = oy;
+  if(!W.goalX){ W.goalX = ox - 12; W.goalY = oy; }
   W.surfaces.sort((a,b)=>a.x0-b.x0);
   W.hazards.sort((a,b)=>a.x0-b.x0);
   W.items.sort((a,b)=>a.x-b.x);
   W.enemies.sort((a,b)=>a.x-b.x);
   return W;
 }
+/* 面の高さと傾き（水平面は y1 が y と同じ） */
+function surfY(s, x){
+  if(s.y1===s.y) return s.y;
+  return s.y + (s.y1-s.y)*clamp((x-s.x0)/(s.x1-s.x0), 0, 1);
+}
+function surfSlope(s){ return s.y1===s.y ? 0 : (s.y1-s.y)/(s.x1-s.x0); }
 function speedAt(world, p){
   const c = world.speed;
   p = clamp(p,0,1);
@@ -534,40 +570,73 @@ function buildStaticWorld(W){
   const at = x => secs[clamp(Math.floor(x/SECTION),0,nSec-1)];
   const rnd = mulberry(0x5eed01);
   const G = CL.ground, I = CL.ice, B = CL.block, A = CL.arch, T = CL.tree, R = CL.rock;
+  /* 任意の x の地面の高さ（穴の上なら一番近い縁の高さ） */
+  const gyAt = x => {
+    let best=null, bd=Infinity;
+    for(const s of W.surfaces){
+      if(s.kind!=='ground') continue;
+      if(x>=s.x0 && x<=s.x1) return surfY(s,x);
+      const d = x<s.x0 ? s.x0-x : x-s.x1;
+      if(d<bd){ bd=d; best = x<s.x0 ? s.y : s.y1; }
+    }
+    return best===null ? 0 : best;
+  };
 
-  /* --- 地面と足場 --- */
+  /* --- 地面と足場（傾斜に対応。4m ごとの小片に割って焼き込む） --- */
+  const ZH = 5.5;                                  // コース半幅
+  function slab(gb, x0,y0,x1,y1, band, capL, capR){
+    /* 上面 */
+    const A=[x0,y0,ZH], B=[x1,y1,ZH], C=[x1,y1,-ZH], D=[x0,y0,-ZH];
+    gb.quad(A,B,C,D, band ? G.top : G.top2, 1.0);
+    /* 手前と奥の断面（上面と平行に色を3段変える） */
+    const bands = [[0.0,0.9,G.top2,0.98],[0.9,3.5,G.side,0.74],[3.5,6.4,G.deep,0.6]];
+    for(const [u,v,col,sh] of bands){
+      gb.quad([x0,y0-u,ZH],[x1,y1-u,ZH],[x1,y1-v,ZH],[x0,y0-v,ZH], col, sh);
+      gb.quad([x1,y1-u,-ZH],[x0,y0-u,-ZH],[x0,y0-v,-ZH],[x1,y1-v,-ZH], col, sh*0.72);
+    }
+    /* 左右の小口は面の端だけ */
+    if(capL) gb.quad([x0,y0,-ZH],[x0,y0,ZH],[x0,y0-6.4,ZH],[x0,y0-6.4,-ZH], G.side, 0.7);
+    if(capR) gb.quad([x1,y1,ZH],[x1,y1,-ZH],[x1,y1-6.4,-ZH],[x1,y1-6.4,ZH], G.side, 0.72);
+  }
   for(const s of W.surfaces){
     if(s.kind==='block') continue;                 // 氷塊の上面は障害物側で描く
     const w = s.x1-s.x0, cx=(s.x0+s.x1)/2, gb = at(cx);
     if(s.kind==='ground'){
-      gb.box(cx, s.y-3.4, 0, w, 6.4, 11, G.side, {top:G.top, bot:G.deep, shTop:1.0, shZ:0.86, shZb:0.55});
-      /* 手前の断面：うっすらと氷の層を入れる（主張させない） */
-      gb.box(cx, s.y-0.9, 5.52, w, 0.9, 0.05, G.top2, {top:G.top2, shZ:0.98});
-      gb.box(cx, s.y-2.7, 5.51, w, 2.6, 0.04, G.side, {top:G.side, shZ:0.72});
-      gb.box(cx, s.y-5.2, 5.50, w, 2.4, 0.04, G.deep, {top:G.deep, shZ:0.62});
-      for(let x=s.x0+2; x<s.x1-2; x+=9.5)
-        gb.box(x, s.y-2.9, 5.53, 0.34, 3.6, 0.04, G.side, {top:G.side, shZ:0.9});
-      /* 雪の帯を 4m 刻みで色替え。テクスチャ無しでも面が読める */
-      for(let x=s.x0; x<s.x1; x+=4){
-        const w2 = Math.min(4, s.x1-x);
-        gb.box(x+w2/2, s.y-0.14, 0, w2, 0.42, 11.36, G.lip,
-               {top:((x/4)|0)%2 ? G.top : G.top2, shTop:1.0, shZ:0.9});
+      const m = surfSlope(s);
+      let i = 0;
+      for(let x=s.x0; x<s.x1-0.001; x+=4, i++){
+        const xe = Math.min(x+4, s.x1);
+        slab(gb, x, surfY(s,x), xe, surfY(s,xe), i%2===0, x===s.x0, xe>=s.x1-0.001);
       }
-      /* 雪のこぶ（走っている実感を出す） */
+      /* 奥と手前の雪の土手（コースの枠）。斜面では低くして段差を出さない */
+      const bankH = Math.abs(m) > 0.08 ? 0.34 : 0.85;
+      for(let x=s.x0; x<s.x1-0.001; x+=6){
+        const xe = Math.min(x+6, s.x1), w2=xe-x;
+        const ya = surfY(s,x)+0.03, yb2 = surfY(s,xe)+0.03;
+        gb.quad([x,ya+bankH,-4.2],[xe,yb2+bankH,-4.2],[xe,yb2+bankH,-5.6],[x,ya+bankH,-5.6], G.top, 1.0);
+        gb.quad([x,ya+bankH,-4.2],[xe,yb2+bankH,-4.2],[xe,yb2,-4.2],[x,ya,-4.2], G.lip, 0.86);
+        gb.quad([x,ya+bankH*0.6,4.2],[xe,yb2+bankH*0.6,4.2],[xe,yb2+bankH*0.6,5.6],[x,ya+bankH*0.6,5.6], G.top2, 1.0);
+        gb.quad([x,ya+bankH*0.6,4.2],[xe,yb2+bankH*0.6,4.2],[xe,yb2,4.2],[x,ya,4.2], G.lip, 0.92);
+      }
+      /* 雪のこぶ */
       for(let x=s.x0+2; x<s.x1-2; x+=7.3){
         const zz = -3.6 + ((x*7)%9);
-        gb.taper(x, s.y+0.02, zz, 2.2, 1.6, 1.0, 0.7, 0.22, G.lip, {top:G.top2, noBottom:true});
+        gb.taper(x, surfY(s,x)+0.02, zz, 2.2, 1.6, 1.0, 0.7, 0.22, G.lip, {top:G.top2, noBottom:true});
       }
-      /* 奥と手前の雪の土手（コースの枠） */
-      gb.taper(cx, s.y+0.05, -5.0, w, 1.5, w, 0.7, 0.85, G.lip, {top:G.top, noBottom:true});
-      gb.taper(cx, s.y+0.05,  5.0, w, 1.3, w, 0.6, 0.5, G.lip, {top:G.top2, noBottom:true});
       /* 崖端のつらら */
       for(const ex of [s.x0, s.x1]){
-        const dir = ex===s.x0 ? 0.35 : -0.35;
+        const dir = ex===s.x0 ? 0.35 : -0.35, ey = surfY(s, ex);
         for(let k=0;k<3;k++)
-          gb.icicle(ex+dir*(0.4+k*0.5), s.y-0.3, -3.2+k*3.2, 0.34, 0.9+rnd()*1.5, I.top);
+          gb.icicle(ex+dir*(0.4+k*0.5), ey-0.3, -3.2+k*3.2, 0.34, 0.9+rnd()*1.5, I.top);
       }
-    }else{ /* 浮き足場 */
+      /* 急な斜面には滑走痕を入れて、傾きが一目で分かるようにする */
+      if(Math.abs(m) > 0.12){
+        for(let x=s.x0+1.5; x<s.x1-1.5; x+=3.2){
+          const xc=x, yc=surfY(s,xc);
+          gb.box(xc, yc+0.03, -2.2+((x*3)%5), 1.9, 0.05, 0.30, G.top2, {top:G.top2, shTop:0.92});
+        }
+      }
+    }else{ /* 浮き足場（レール） */
       gb.box(cx, s.y-0.45, 0, w, 0.9, 8.2, I.side, {top:G.top, bot:I.side});
       gb.box(cx, s.y-0.05, 0, w+0.35, 0.34, 8.6, G.lip, {top:G.top, shZ:0.95});
       for(let k=0;k<4;k++)
@@ -576,33 +645,34 @@ function buildStaticWorld(W){
   }
   /* --- 氷結ゾーン（地面の上に薄い氷を重ねる） --- */
   for(const z of W.ices){
-    for(let x=z.x0; x<z.x1; x+=8){
-      const w = Math.min(8, z.x1-x), cx=x+w/2;
-      at(cx).box(cx, 0.12, 0, w, 0.22, 10.6, I.side, {top:I.top, shTop:1.04, shZ:0.9});
-      /* 表面の光沢とひび。滑る床だと一目で分かるように */
-      at(cx).box(cx, 0.235, -3.6+(x%3), w*0.52, 0.04, 1.3, I.spec, {top:I.spec, shTop:1.12});
-      at(cx).box(cx-w*0.2, 0.235, 1.4+(x%4)*0.6, w*0.3, 0.04, 0.5, I.spec, {top:I.spec, shTop:1.12});
-      at(cx).box(cx+w*0.1, 0.234, -1.2, 0.12, 0.03, 4.2, I.side, {top:I.side, shTop:0.86});
+    for(let x=z.x0; x<z.x1; x+=4){
+      const w = Math.min(4, z.x1-x), cx=x+w/2, gb=at(cx);
+      const ya = gyAt(x)+0.02, yb = gyAt(x+w)+0.02;
+      gb.quad([x,ya+0.2,5.3],[x+w,yb+0.2,5.3],[x+w,yb+0.2,-5.3],[x,ya+0.2,-5.3], I.top, 1.04);
+      gb.quad([x,ya+0.2,5.3],[x+w,yb+0.2,5.3],[x+w,yb-0.1,5.3],[x,ya-0.1,5.3], I.side, 0.9);
+      gb.box(cx, (ya+yb)/2+0.24, -3.6+(x%3), w*0.62, 0.04, 1.3, I.spec, {top:I.spec, shTop:1.12});
+      gb.box(cx-w*0.2, (ya+yb)/2+0.24, 1.4+(x%4)*0.6, w*0.34, 0.04, 0.5, I.spec, {top:I.spec, shTop:1.12});
     }
     /* 端に氷の縁を立てて、入口と出口を分かるようにする */
     for(const ex of [z.x0, z.x1]){
-      at(ex).taper(ex, 0.2, -4.4, 0.7, 1.2, 0.3, 0.7, 0.9, I.top, {top:I.spec});
-      at(ex).taper(ex, 0.2,  4.4, 0.7, 1.2, 0.3, 0.7, 0.9, I.top, {top:I.spec});
+      const ey = gyAt(ex);
+      at(ex).taper(ex, ey+0.2, -4.4, 0.7, 1.2, 0.3, 0.7, 0.9, I.top, {top:I.spec});
+      at(ex).taper(ex, ey+0.2,  4.4, 0.7, 1.2, 0.3, 0.7, 0.9, I.top, {top:I.spec});
     }
   }
   /* --- 障害物 --- */
   for(const h of W.hazards){
-    const gb = at(h.cx);
+    const gb = at(h.cx), b = h.base||0;
     if(h.type==='block'){
       if(B.shape==='icicle'){
-        gb.taper(h.cx, 0, 0, h.w*1.15, 3.0, h.w*0.9, 2.2, h.h, B.main, {top:B.tip});
-        gb.taper(h.cx, 0, 0, h.w*0.55, 2.0, h.w*0.3, 1.0, h.h*1.28, B.edge, {top:B.tip, noBottom:true});
-        gb.spike(h.cx-h.w*0.75, 0, -1.6, h.w*0.5, h.h*0.72, B.edge);
-        gb.spike(h.cx+h.w*0.7, 0, 1.5, h.w*0.45, h.h*0.6, B.edge);
-        gb.box(h.cx, h.h-0.06, 0, h.w*1.2, 0.16, 2.3, CL.ground.lip, {top:CL.ground.top});
+        gb.taper(h.cx, b, 0, h.w*1.15, 3.0, h.w*0.9, 2.2, h.h, B.main, {top:B.tip});
+        gb.taper(h.cx, b, 0, h.w*0.55, 2.0, h.w*0.3, 1.0, h.h*1.28, B.edge, {top:B.tip, noBottom:true});
+        gb.spike(h.cx-h.w*0.75, b, -1.6, h.w*0.5, h.h*0.72, B.edge);
+        gb.spike(h.cx+h.w*0.7, b, 1.5, h.w*0.45, h.h*0.6, B.edge);
+        gb.box(h.cx, b+h.h-0.06, 0, h.w*1.2, 0.16, 2.3, CL.ground.lip, {top:CL.ground.top});
       }else{
-        gb.taper(h.cx, 0, 0, h.w*1.2, 3.0, h.w, 2.4, h.h, B.main, {top:B.tip});
-        gb.box(h.cx-h.w*0.6, h.h*0.35, 1.0, h.w*0.5, h.h*0.5, 1.6, B.edge);
+        gb.taper(h.cx, b, 0, h.w*1.2, 3.0, h.w, 2.4, h.h, B.main, {top:B.tip});
+        gb.box(h.cx-h.w*0.6, b+h.h*0.35, 1.0, h.w*0.5, h.h*0.5, 1.6, B.edge);
       }
     }else{ /* くぐる障害物 */
       gb.box(h.cx, h.yb+2.0, 0, h.w+0.6, 1.7, 9.4, A.edge, {top:CL.ground.top, bot:A.main});
@@ -612,35 +682,35 @@ function buildStaticWorld(W){
           gb.icicle(x, h.yb+1.15, -3.4+k*3.4, 0.30, 1.15-(k===1?0:0.25), A.main);
       }
       for(const zz of [-4.3, 4.3]){
-        gb.taper(h.x0-0.2, 0, zz, 1.1, 1.1, 0.8, 0.8, h.yb+2.9, A.edge, {top:A.main});
-        gb.taper(h.x1+0.2, 0, zz, 1.1, 1.1, 0.8, 0.8, h.yb+2.9, A.edge, {top:A.main});
+        gb.taper(h.x0-0.2, b, zz, 1.1, 1.1, 0.8, 0.8, h.yb+2.9-b, A.edge, {top:A.main});
+        gb.taper(h.x1+0.2, b, zz, 1.1, 1.1, 0.8, 0.8, h.yb+2.9-b, A.edge, {top:A.main});
       }
     }
   }
   /* --- 減速サイン（この先は詰まっている、の予告） --- */
   for(const s of W.signs){
-    const gb = at(s.x);
-    gb.cyl(s.x, 0, 4.0, 0.16, 0.16, 2.6, 6, 0x35506e, {cap:true});
-    gb.box(s.x, 2.9, 4.0, 1.9, 1.2, 0.18, 0xffd23f, {top:0xffd23f, shZ:1.05});
-    gb.box(s.x, 2.9, 4.09, 1.3, 0.62, 0.06, 0x1b2b3f, {top:0x1b2b3f, shZ:1.05});
-    for(let i=0;i<3;i++) gb.box(s.x-0.40+i*0.40, 2.9, 4.14, 0.20, 0.46, 0.05, 0xffd23f, {shZ:1.1});
+    const gb = at(s.x), b = s.y||0;
+    gb.cyl(s.x, b, 4.0, 0.16, 0.16, 2.6, 6, 0x35506e, {cap:true});
+    gb.box(s.x, b+2.9, 4.0, 1.9, 1.2, 0.18, 0xffd23f, {top:0xffd23f, shZ:1.05});
+    gb.box(s.x, b+2.9, 4.09, 1.3, 0.62, 0.06, 0x1b2b3f, {top:0x1b2b3f, shZ:1.05});
+    for(let i=0;i<3;i++) gb.box(s.x-0.40+i*0.40, b+2.9, 4.14, 0.20, 0.46, 0.05, 0xffd23f, {shZ:1.1});
   }
   /* --- ゴール --- */
   if(W.goalX){
-    const gb = at(W.goalX), gx = W.goalX, GC = CL.goal;
+    const gb = at(W.goalX), gx = W.goalX, GC = CL.goal, gy0 = W.goalY||0;
     for(const zz of [-4.6, 4.6]){
-      gb.taper(gx, 0, zz, 1.0, 1.0, 0.7, 0.7, 6.4, GC.post, {top:GC.flag});
-      gb.box(gx, 6.9, zz, 1.3, 0.5, 1.3, GC.flag, {top:GC.flag});
+      gb.taper(gx, gy0, zz, 1.0, 1.0, 0.7, 0.7, 6.4, GC.post, {top:GC.flag});
+      gb.box(gx, gy0+6.9, zz, 1.3, 0.5, 1.3, GC.flag, {top:GC.flag});
     }
-    gb.box(gx, 6.2, 0, 1.0, 1.1, 9.4, GC.post, {top:GC.post});
+    gb.box(gx, gy0+6.2, 0, 1.0, 1.1, 9.4, GC.post, {top:GC.post});
     for(let i=0;i<10;i++)
-      gb.box(gx+0.55, 6.2, -4.3+i*0.95, 0.12, 1.0, 0.95, i%2 ? 0xffffff : 0x1b2b3f, {shZ:1.05, top:i%2?0xffffff:0x1b2b3f});
+      gb.box(gx+0.55, gy0+6.2, -4.3+i*0.95, 0.12, 1.0, 0.95, i%2 ? 0xffffff : 0x1b2b3f, {shZ:1.05, top:i%2?0xffffff:0x1b2b3f});
     for(let i=0;i<10;i++)
-      gb.box(gx-0.55, 6.2, -4.3+i*0.95, 0.12, 1.0, 0.95, i%2 ? 0x1b2b3f : 0xffffff, {shZ:1.05, top:i%2?0xffffff:0x1b2b3f});
+      gb.box(gx-0.55, gy0+6.2, -4.3+i*0.95, 0.12, 1.0, 0.95, i%2 ? 0x1b2b3f : 0xffffff, {shZ:1.05, top:i%2?0xffffff:0x1b2b3f});
   }
   /* --- 背景の木・岩・雪山（ステージ全域にばら撒く） --- */
   for(let x=6; x<W.length+40; x += 5 + rnd()*9){
-    const gb = at(x);
+    const gb = at(x), by = gyAt(x);
     const back = rnd()<0.72;
     const z = back ? -(8 + rnd()*20) : (9 + rnd()*7);
     const s = back ? (0.85 + rnd()*1.5) : (0.30 + rnd()*0.34);
@@ -648,26 +718,26 @@ function buildStaticWorld(W){
     if(r < 0.62){                                        /* 木 */
       if(T.shape==='pine'){
         const h = 3.4*s;
-        gb.cyl(x, 0, z, 0.22*s, 0.18*s, h*0.32, 5, T.trunk);
+        gb.cyl(x, by, z, 0.22*s, 0.18*s, h*0.32, 5, T.trunk);
         for(let k=0;k<3;k++){
           const yy = h*0.24 + k*h*0.26, ss = (1.9-k*0.45)*s;
-          gb.spike(x, yy, z, ss, h*0.55, k===2?T.leaf2:T.leaf);
-          gb.spike(x, yy+h*0.30, z, ss*0.55, h*0.2, T.snow, {noBottom:true});
+          gb.spike(x, by+yy, z, ss, h*0.55, k===2?T.leaf2:T.leaf);
+          gb.spike(x, by+yy+h*0.30, z, ss*0.55, h*0.2, T.snow, {noBottom:true});
         }
       }else{
         const h=4.2*s;
-        gb.cyl(x, 0, z, 0.26*s, 0.16*s, h, 5, T.trunk);
+        gb.cyl(x, by, z, 0.26*s, 0.16*s, h, 5, T.trunk);
         for(let k=0;k<5;k++){
           const a=k/5*Math.PI*2;
-          gb.box(x+Math.cos(a)*1.1*s, h-0.2*s, z+Math.sin(a)*1.1*s, 2.3*s, 0.18*s, 0.7*s, T.leaf, {top:T.leaf2});
+          gb.box(x+Math.cos(a)*1.1*s, by+h-0.2*s, z+Math.sin(a)*1.1*s, 2.3*s, 0.18*s, 0.7*s, T.leaf, {top:T.leaf2});
         }
       }
     } else if(r < 0.82){                                  /* 岩 */
       const s2 = s*(0.7+rnd()*0.6);
-      gb.taper(x, 0, z, 1.7*s2, 1.6*s2, 1.1*s2, 1.0*s2, 1.2*s2, R.main, {top:R.snow});
+      gb.taper(x, by, z, 1.7*s2, 1.6*s2, 1.1*s2, 1.0*s2, 1.2*s2, R.main, {top:R.snow});
     } else {                                              /* 雪の丘 */
       const s3 = s*(1.4+rnd());
-      gb.taper(x, -0.2, z, 4.2*s3, 3.4*s3, 1.6*s3, 1.4*s3, 1.1*s3, CL.ground.lip, {top:CL.ground.top, noBottom:true});
+      gb.taper(x, by-0.2, z, 4.2*s3, 3.4*s3, 1.6*s3, 1.4*s3, 1.1*s3, CL.ground.lip, {top:CL.ground.top, noBottom:true});
     }
   }
   for(let i=0;i<secs.length;i++){
@@ -897,6 +967,67 @@ function emitSpray(x,y,z,n,pow,up){
     sprayL[i]=0.45+Math.random()*0.5;
   }
 }
+/* ニアミスの火花 */
+const SPARKN = 40;
+const sparks = makePoints(SPARKN, 0.34, 0xffffff, {opacity:1, blending:THREE.AdditiveBlending});
+const sparkP = new Float32Array(SPARKN*3), sparkV = new Float32Array(SPARKN*3), sparkL = new Float32Array(SPARKN);
+let sparkI = 0;
+function emitSpark(x,y){
+  for(let k=0;k<10;k++){
+    const i = sparkI = (sparkI+1)%SPARKN;
+    sparkP[i*3]=x; sparkP[i*3+1]=y; sparkP[i*3+2]=(Math.random()-0.5)*1.2;
+    sparkV[i*3]=(Math.random()-0.7)*9; sparkV[i*3+1]=(Math.random()-0.3)*7; sparkV[i*3+2]=(Math.random()-0.5)*5;
+    sparkL[i]=0.3+Math.random()*0.2;
+  }
+}
+
+/* 手前を流れる小物と流線。速度感はここでほとんど決まる */
+const FGN = 11, fgObjs = [];
+(function(){
+  let gb = new GB();
+  gb.taper(0,0,0, 1.5,1.2, 0.5,0.5, 1.2, CL.ground.lip, {top:CL.ground.top});
+  const shard = gb.geo();
+  gb = new GB();
+  gb.spike(0,0,0, 1.1, 1.6, CL.ice.top);
+  const spike = gb.geo();
+  for(let i=0;i<FGN;i++){
+    const m = new THREE.Mesh(i%2 ? shard : spike, worldMat);
+    m.position.set(-999,0,10); scene.add(m); fgObjs.push(m);
+  }
+})();
+const LINEN = 18, lineObjs = [];
+(function(){
+  const g = new THREE.PlaneGeometry(4.5, 0.06);
+  const mat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.0,
+                blending:THREE.AdditiveBlending, depthWrite:false, fog:false, side:THREE.DoubleSide});
+  for(let i=0;i<LINEN;i++){
+    const m = new THREE.Mesh(g, mat); m.position.set(-999,0,16); m.frustumCulled=false;
+    scene.add(m); lineObjs.push(m);
+  }
+  lineObjs.mat = mat;
+})();
+function recycleForeground(camX, camY, sk){
+  for(const m of fgObjs){
+    if(m.position.x < camX - 30){
+      m.position.x += 62 + Math.random()*40;
+      m.position.z = 8.5 + Math.random()*7;
+      m.position.y = camY - 9.5 + Math.random()*4.5;   // 画面の下端をかすめさせる
+      m.scale.setScalar(0.30 + Math.random()*0.55);
+      m.rotation.set(Math.random()*3, Math.random()*3, Math.random()*0.6-0.3);
+    }
+  }
+  lineObjs.mat.opacity = sk<0.3 ? 0 : (sk-0.3)*0.42;
+  for(const m of lineObjs){
+    m.visible = sk > 0.3;
+    if(m.position.x < camX - 24){
+      m.position.x += 40 + Math.random()*26;
+      m.position.z = 13 + Math.random()*8;
+      m.position.y = camY - 8 + Math.random()*13;
+      m.scale.x = 0.6 + Math.random()*1.3;
+    }
+  }
+}
+
 /* 脱げた服の破片 */
 const debris = [];
 (function(){ for(let i=0;i<7;i++){
@@ -1043,6 +1174,8 @@ const Sound = {
   },
   jump(){ this.tone(320, 0.16, 'square', 0.22, 760); this.burst(0.12, 0.16, 1600); },
   land(){ this.burst(0.16, 0.22, 700); },
+  launch(){ this.tone(180, 0.28, 'sawtooth', 0.22, 620); this.burst(0.22, 0.3, 1200); },
+  near(){ this.burst(0.13, 0.30, 5200); this.tone(1900, 0.07, 'sine', 0.10, 2600); },
   coin(){ const t=this.ready?this.ctx.currentTime:0;
           this.tone(1180, 0.07,'square',0.18,null,t); this.tone(1760,0.12,'square',0.16,null,t+0.06); },
   wear(){ const t=this.ready?this.ctx.currentTime:0;
@@ -1066,7 +1199,7 @@ const Sound = {
   stopBGM(){ this.bgmOn=false; },
   update(intensity){
     if(!this.ready||!this.bgmOn||!this.on) return;
-    const c=this.ctx, spb = 60/CL.music.tempo/4;
+    const c=this.ctx, spb = 60/(CL.music.tempo*(1+intensity*0.22))/4;
     while(this.nextNote < c.currentTime + 0.2){
       const t=this.nextNote, s=this.step, bar=(s>>4)&3;
       const root = CL.music.root, sc = CL.music.scale;
@@ -1117,16 +1250,18 @@ const Store = {
 function makeRecord(g, sc, cleared){
   return { v:1, game:'jet-board-rush', stage:g.world.id, climate:g.world.climate,
            cleared:cleared, score:sc.total, timeMs:Math.round(g.timeMs),
-           coins:g.coins, distance:Math.round(g.dist), damage:g.dmg,
+           coins:g.coins, near:g.near, distance:Math.round(g.dist), damage:g.dmg,
            at:new Date().toISOString() };
 }
 function computeScore(g, cleared){
   const coinPts = g.coins*120;
+  const nearPts = g.near*P.nearPts;
   const distPts = Math.floor(g.dist)*3;
   const clearB  = cleared ? 3000 : 0;
   const timeB   = cleared ? Math.max(0, Math.round((115 - g.timeMs/1000)*80)) : 0;
   const dmgB    = cleared ? (g.dmg===0 ? 2500 : (g.dmg===1 ? 900 : 0)) : 0;
-  return {coinPts, distPts, clearB, timeB, dmgB, total:coinPts+distPts+clearB+timeB+dmgB};
+  return {coinPts, nearPts, distPts, clearB, timeB, dmgB,
+          total:coinPts+nearPts+distPts+clearB+timeB+dmgB};
 }
 const fmtTime = ms => (ms/1000).toFixed(2)+'s';
 
@@ -1147,14 +1282,15 @@ const G = {
   world, state:'TITLE', paused:false, t:0, px:4, py:0, vy:0, speed:8, onGround:true,
   coyote:0, jumpCut:false, crouching:false, clothes:true, invuln:0, hitT:0,
   coins:0, dmg:0, timeMs:0, dist:0, shake:0, camY:5, deadT:0, clearT:0,
-  brakeAmt:0, iceOn:false, faceY:0, hintT:0, blinkT:0
+  brakeAmt:0, iceOn:false, faceY:0, hintT:0, blinkT:0,
+  groundSlope:0, camDip:0, near:0, popT:0, lastY:0, airT:0, rampT:0, rampM:0
 };
 
 const el = id => document.getElementById(id);
 const UI = {
   hud:el('hud'), bar:el('barFill'), barIcon:el('barIcon'), coin:el('coinNum'), spd:el('spdNum'),
   title:el('title'), result:el('result'), hint:el('hint'), hintGlyph:el('hintGlyph'), hintCap:el('hintCap'),
-  flash:el('flash'), rtitle:el('resultTitle'), rsub:el('resultSub'), sheet:el('sheet'),
+  pop:el('pop'), flash:el('flash'), rtitle:el('resultTitle'), rsub:el('resultSub'), sheet:el('sheet'),
   total:el('totalNum'), newbest:el('newbest'), titleBest:el('titleBest'), resultBest:el('resultBest'),
   keyrow:el('keyrow'), startPrompt:el('startPrompt'), retryPrompt:el('retryPrompt')
 };
@@ -1191,6 +1327,9 @@ function resetRun(state){
   G.speed = speedAt(world, 0); G.onGround=true; G.coyote=0; G.jumpCut=false;
   G.crouching=false; G.clothes=true; G.invuln=0; G.hitT=0; G.coins=0; G.dmg=0;
   G.timeMs=0; G.dist=0; G.shake=0; G.deadT=0; G.clearT=0; G.brakeAmt=0; G.faceY=0;
+  G.groundSlope=0; G.camDip=0; G.near=0; G.popT=0; G.lastY=0; G.airT=0; G.rampT=0; G.rampM=0;
+  for(const h of world.hazards) h._clr = null;
+  for(const e of world.enemies) e._clr = null;
   for(const it of world.items){ it.got=false; if(it.mesh) it.mesh.visible=true; }
   for(const e of world.enemies){ e.x=e.home; e.alive=true; e.ph=Math.random()*6.28;
     if(e.mesh){ scene.remove(e.mesh); e.mesh=null; } }
@@ -1198,7 +1337,10 @@ function resetRun(state){
   for(const c of rider.userData.clothes) c.visible = true;
   rider.visible = true; rider.rotation.set(0,0,0);
   for(const d of debris){ d.life=0; d.m.visible=false; }
+  for(const m of fgObjs) m.position.x = G.px + Math.random()*70;
+  for(const m of lineObjs) m.position.x = G.px + Math.random()*46;
   UI.hint.classList.remove('show');
+  UI.pop.style.opacity = 0;
 }
 function startGame(){
   resetRun('PLAY');
@@ -1220,6 +1362,17 @@ function togglePause(){
   if(G.paused) Sound.quiet();
 }
 addEventListener('visibilitychange', ()=>{ if(document.hidden && G.state==='PLAY' && !G.paused) togglePause(); });
+
+/* ----------------------------------------------------------- ニアミス
+   ぎりぎりで抜けたら得点。危ない通り方が損ではなく得になるようにする。 */
+function nearMiss(x, y){
+  if(G.state!=='PLAY' || G.invuln>0) return;
+  G.near++;
+  emitSpark(x, y);
+  Sound.near();
+  UI.pop.textContent = '+'+P.nearPts;
+  G.popT = 0.6;
+}
 
 /* --------------------------------------------------------- 被弾・死亡 */
 function flash(a){ UI.flash.style.transition='none'; UI.flash.style.opacity=a;
@@ -1258,6 +1411,7 @@ function showResult(cleared){
   const rows = [];
   rows.push(['TIME', fmtTime(G.timeMs)]);
   rows.push(['❄ CRYSTAL', G.coins+' × 120 = '+sc.coinPts.toLocaleString()]);
+  if(G.near) rows.push(['NEAR MISS', G.near+' × '+P.nearPts+' = '+sc.nearPts.toLocaleString()]);
   rows.push(['DISTANCE', Math.round(G.dist)+' m = '+sc.distPts.toLocaleString()]);
   if(cleared){
     rows.push(['GOAL', '+'+sc.clearB.toLocaleString()]);
@@ -1277,13 +1431,21 @@ function showResult(cleared){
 
 /* ======================================================== ゲーム進行 */
 const _m4 = new THREE.Object3D();
-function groundYAt(x, maxY){
+function supportAt(x, maxY){
   let best = null;
   for(const s of world.surfaces){
-    if(x < s.x0-0.3 || x > s.x1+0.3) continue;
-    if(s.y <= maxY+0.05 && (best===null || s.y > best)) best = s.y;
+    if(x < s.x0 || x > s.x1) continue;
+    const sy = surfY(s, x);
+    if(sy <= maxY && (best===null || sy > best.y)) best = {y:sy, s:s};
   }
   return best;
+}
+function groundYAt(x, maxY){ const b = supportAt(x, maxY); return b ? b.y : null; }
+/* 地面（浮き足場や氷塊を除く）の高さ。敵とカメラが使う */
+function terrainY(x){
+  for(const s of world.surfaces)
+    if(s.kind==='ground' && x>=s.x0 && x<=s.x1) return surfY(s, x);
+  return null;
 }
 function stepPlay(dt){
   G.crouching = IN.crouch;
@@ -1300,6 +1462,8 @@ function stepPlay(dt){
     target *= bf;
   }
   if(G.hitT>0) target *= P.hitMul;
+  /* 坂：下りで伸び、上りで削れる。基準のカーブからの一時的なずれとして効かせる */
+  if(G.onGround && G.groundSlope) target *= clamp(1 - G.groundSlope*P.slopeGain, P.slopeMin, P.slopeMax);
   const k = target < G.speed ? 4.2 : 2.0;
   G.speed += (target-G.speed)*(1-Math.exp(-k*dt));
   G.px += G.speed*dt;
@@ -1311,29 +1475,62 @@ function stepPlay(dt){
     Sound.jump(); emitSpray(G.px-0.4, G.py+0.1, 0, 8, 3, 2.2);
   }
   if(!G.jumpCut && G.vy>0 && !IN.jumpHeld){ G.vy *= P.cutJump; G.jumpCut = true; }
-  const prevFeet = G.py;
+  const prevFeet = G.py, wasGround = G.onGround, jumped = G.vy > 0.001;
   G.vy -= P.gravity*dt;
   G.py += G.vy*dt;
 
-  let land = null;
-  for(const s of world.surfaces){
-    if(G.px+0.45 < s.x0 || G.px-0.45 > s.x1) continue;
-    if(G.vy<=0 && prevFeet >= s.y-0.03 && G.py <= s.y){ if(!land || s.y>land.y) land = s; }
+  let sup = null;
+  if(!jumped){
+    /* 上り坂を登る余裕（climb）と、下り坂に貼り付く余裕（stick） */
+    const climb = wasGround ? G.speed*dt*1.35 + 0.06 : 0.06;
+    const stick = wasGround ? G.speed*dt*1.20 + 0.30 : 0;
+    const cand = supportAt(G.px, prevFeet + climb);
+    if(cand && (G.py <= cand.y || G.py - cand.y <= stick)) sup = cand;
   }
-  if(land){
-    if(!G.onGround){ Sound.land(); emitSpray(G.px-0.3, land.y+0.05, 0, 10, 3.2, 2.4); }
-    G.py = land.y; G.vy = 0; G.onGround = true; G.coyote = P.coyote; G.jumpCut = false;
+  if(sup){
+    if(!wasGround){
+      Sound.land(); emitSpray(G.px-0.3, sup.y+0.05, 0, 10, 3.2, 2.4);
+      G.camDip = Math.min(0.85, Math.abs(G.vy)*0.035 + 0.12);   // 着地の沈み込み
+      /* 縁すれすれの着地もニアミス扱い */
+      if(G.airT > 0.28 && G.px - sup.s.x0 < 1.5 && sup.s.x0 > 1) nearMiss(G.px, sup.y+0.6);
+    }
+    G.py = sup.y; G.vy = 0; G.onGround = true; G.coyote = P.coyote; G.jumpCut = false;
+    G.groundSlope = surfSlope(sup.s); G.lastY = sup.y; G.airT = 0;
+    if(G.groundSlope > 0.12){ G.rampT = 0.32; G.rampM = G.groundSlope; }
+    else G.rampT = Math.max(0, G.rampT - dt);
   }else{
-    if(G.onGround){ G.onGround=false; G.coyote = P.coyote; }
+    G.airT += dt;
+    if(wasGround){
+      G.onGround = false; G.coyote = P.coyote;
+      /* 上り坂（を離れた直後まで）はジャンプ台。跳んだ勢いに坂ぶんが上乗せされる */
+      if(G.rampT > 0){
+        const boost = Math.min(G.speed*G.rampM*0.95, 12);
+        G.vy = Math.min(G.vy + boost, 20);
+        if(boost > 3.5){ emitSpray(G.px-0.4, G.py, 0, 16, 4, 3.4); Sound.launch(); G.shake = Math.max(G.shake, 0.28); }
+      }
+    }
     G.coyote -= dt;
   }
-  if(G.py < P.fallY){ G.lastHit={src:'fall', x:+G.px.toFixed(1)}; die(); return; }
+  if(G.py < G.lastY - P.fallDrop){ G.lastHit={src:'fall', x:+G.px.toFixed(1)}; die(); return; }
 
-  /* --- 障害物 --- */
+  /* --- 障害物（すり抜けざま、どれだけ際どかったかを記録する） --- */
   const top = G.py + h, x0 = G.px-P.bodyW/2, x1 = G.px+P.bodyW/2;
   for(const hz of world.hazards){
-    if(x1 < hz.x0 || x0 > hz.x1) continue;
-    if(top > hz.y0 && G.py < hz.y1){ G.lastHit={src:hz.type, x:+hz.cx.toFixed(1)}; hurt(); break; }
+    if(x1 < hz.x0 || x0 > hz.x1){
+      if(hz._clr!=null && x0 > hz.x1){
+        if(hz.type!=='low' && hz._clr < P.nearMiss) nearMiss(hz.cx, hz.y1+0.3);
+        hz._clr = null;
+      }
+      continue;
+    }
+    if(hz.type!=='low'){
+      const clr = G.py - hz.y1;
+      hz._clr = hz._clr==null ? clr : Math.min(hz._clr, clr);
+    }
+    if(top > hz.y0 && G.py < hz.y1){
+      G.lastHit={src:hz.type, x:+hz.cx.toFixed(1), crouch:G.crouching, py:+G.py.toFixed(2),
+                 y0:+hz.y0.toFixed(2)};
+      hurt(); break; }
   }
   /* --- 敵 --- */
   for(const e of world.enemies){
@@ -1341,13 +1538,22 @@ function stepPlay(dt){
     const near = Math.abs(e.x - G.px) < 70;
     if(e.x - G.px < 30) e.x -= d.spd*dt;      // 近づいてから動き出す（配置が崩れない）
     if(!near) continue;
-    const ey = e.kind==='flyer' ? e.y + Math.sin(G.t*3+e.ph)*0.22 : 0;
+    const gy = terrainY(e.x);
+    if(gy!==null) e.y = gy + e.dy;
+    const ey = e.kind==='flyer' ? e.y + Math.sin(G.t*3+e.ph)*0.22 : e.y;
+    if(x1 > e.x-d.w/2 && x0 < e.x+d.w/2){
+      const clr = e.kind==='flyer' ? ey - top : G.py - (ey+d.h);
+      e._clr = e._clr==null ? clr : Math.min(e._clr, clr);
+    }else if(e._clr!=null && x0 > e.x+d.w/2){
+      if(e._clr < P.nearMiss) nearMiss(e.x, ey+d.h*0.5); e._clr = null;
+    }
     if(x1 > e.x-d.w/2 && x0 < e.x+d.w/2 && top > ey && G.py < ey+d.h){
-      G.lastHit={src:'enemy:'+e.kind, x:+e.x.toFixed(1)}; hurt(); break; }
+      G.lastHit={src:'enemy:'+e.kind, x:+e.x.toFixed(1), crouch:G.crouching, py:+G.py.toFixed(2)};
+      hurt(); break; }
   }
   /* --- アイテム --- */
   for(const it of world.items){
-    if(it.got) continue;
+    if(it.got || G.state!=='PLAY') continue;
     if(Math.abs(it.x - G.px) > 2) continue;
     const cy = G.py + h*0.5;
     if(Math.abs(it.x-G.px) < 0.95 && Math.abs(it.y-cy) < 1.15){
@@ -1362,22 +1568,42 @@ function stepPlay(dt){
     }
   }
   /* --- ヒント --- */
-  for(const hint of world.hints){
+  if(G.state==='PLAY') for(const hint of world.hints){
     if(!hint.fired && G.px > hint.x){ hint.fired=true; showHint(hint.icon); }
   }
   /* --- タイマー・ゴール --- */
-  G.timeMs += dt*1000;
+  if(G.state==='PLAY') G.timeMs += dt*1000;
   if(G.invuln>0) G.invuln -= dt;
   if(G.hitT>0) G.hitT -= dt;
   if(IN.jumpBuf>0) IN.jumpBuf -= dt;
   if(G.px >= world.goalX) finish();
 }
 
+function autoPilot(dt){
+  const v = Math.max(1, G.speed);
+  IN.crouch = world.hazards.some(h=>h.type==='low' && G.px > h.x0 - v*0.5 && G.px < h.x1+0.8);
+  let want = false;
+  for(const h of world.hazards)
+    if(h.type!=='low'){ const t=(h.x0-G.px)/v; if(t>0 && t<0.28) want = true; }
+  for(let d=0; d<40; d+=0.5){
+    const x = G.px+d;
+    if(!world.surfaces.some(su=>su.kind!=='block' && x>=su.x0 && x<=su.x1)){
+      if(d < Math.max(1.0, v*0.09)) want = true;
+      break;
+    }
+  }
+  if(want && (G.onGround||G.coyote>0)){ IN.jumpBuf = P.buffer; G.autoJ = 0.34; }
+  G.autoJ = Math.max(0, (G.autoJ||0) - dt);
+  IN.jumpHeld = G.autoJ > 0;
+}
 function stepAttract(dt){
-  G.speed = 8.4;
-  G.px += G.speed*dt;
-  if(G.px > 54){ G.px = 2; }
-  G.py = 0; G.onGround = true; G.crouching = false;
+  autoPilot(dt);
+  stepPlay(dt);                                  // 判定は state が PLAY のときだけ働く
+  if(G.px > 96 || G.py < G.lastY - 10){          // 導入部だけを繰り返す
+    G.px = 4; G.py = 0; G.vy = 0; G.lastY = 0; G.speed = speedAt(world, 0);
+    G.onGround = true; G.airT = 0;
+    for(const h of world.hazards) h._clr = null;
+  }
 }
 
 /* ------------------------------------------------------- 見た目更新 */
@@ -1390,7 +1616,7 @@ function updateRider(dt){
     const wantY = IN.brake && G.state==='PLAY' ? Math.PI*0.94 : 0;
     G.faceY += (wantY-G.faceY)*Math.min(1, dt*11);
     rider.rotation.y = G.faceY;
-    let rz = clamp(-G.vy*0.018, -0.30, 0.22);
+    let rz = G.onGround ? Math.atan(G.groundSlope) : clamp(-G.vy*0.018, -0.34, 0.24);
     if(IN.brake && G.state==='PLAY') rz += 0.16;
     if(G.crouching) rz -= 0.10;
     rider.rotation.z += (rz-rider.rotation.z)*Math.min(1, dt*12);
@@ -1454,6 +1680,16 @@ function updateParticles(dt, camX, camY){
     }else{ sa[i*3+1] = -999; }
   }
   spray.geometry.attributes.position.needsUpdate = true;
+  /* ニアミスの火花 */
+  const ka = sparks.geometry.attributes.position.array;
+  for(let i=0;i<SPARKN;i++){
+    if(sparkL[i]>0){
+      sparkL[i]-=dt; sparkV[i*3+1] -= 12*dt;
+      sparkP[i*3]+=sparkV[i*3]*dt; sparkP[i*3+1]+=sparkV[i*3+1]*dt; sparkP[i*3+2]+=sparkV[i*3+2]*dt;
+      ka[i*3]=sparkP[i*3]; ka[i*3+1]=sparkP[i*3+1]; ka[i*3+2]=sparkP[i*3+2];
+    }else ka[i*3+1] = -999;
+  }
+  sparks.geometry.attributes.position.needsUpdate = true;
   /* 脱げた服 */
   for(const d of debris){
     if(d.life<=0){ if(d.m.visible) d.m.visible=false; continue; }
@@ -1492,12 +1728,14 @@ function updateEnemies(dt){
     }else if(!near && e.mesh){ scene.remove(e.mesh); e.mesh=null; }
     if(!e.mesh) continue;
     const d = ENEMY_DEF[e.kind];
+    const gy = terrainY(e.x);
+    if(gy!==null) e.y = gy + e.dy;                 // 坂の上でも地面に乗る
     if(e.kind==='flyer'){
       e.mesh.position.set(e.x, e.y + Math.sin(G.t*3+e.ph)*0.22 + 0.45, 0);
       e.mesh.rotation.z = Math.sin(G.t*3+e.ph)*0.16;
       e.mesh.rotation.y = 0;
     }else{
-      e.mesh.position.set(e.x, Math.abs(Math.sin(G.t*6+e.ph))*0.16, 0);
+      e.mesh.position.set(e.x, e.y + Math.abs(Math.sin(G.t*6+e.ph))*0.16, 0);
       e.mesh.rotation.z = Math.sin(G.t*6+e.ph)*0.10;
     }
   }
@@ -1513,17 +1751,27 @@ function updateHUD(){
 
 /* ============================================================= カメラ */
 function updateCamera(dt){
-  const halfW = P.viewW/2;
+  const sk = clamp((G.speed-9)/12, 0, 1);            // 体感速度の強さ
+  camera.fov += (lerp(P.fov, P.fovFast, sk) - camera.fov)*Math.min(1, dt*2.5);
+  camera.updateProjectionMatrix();
+  const halfW = lerp(P.viewW, P.viewWFast, sk)/2;
   const dist = halfW/(Math.tan(camera.fov*Math.PI/360)*camera.aspect);
-  const targetY = clamp(G.py,0,9)*0.5 + 4.5;
-  G.camY += (targetY-G.camY)*Math.min(1, dt*3.6);
+  /* 先の地形を見てカメラを構える（落ちる前に落ちる先が見える） */
+  const ya = terrainY(G.px + 20);
+  const base = ya===null ? G.py : lerp(G.py, Math.max(ya, G.py-7), 0.45);
+  const targetY = base + 4.5;
+  G.camY += (targetY-G.camY)*Math.min(1, dt*4.2);
+  G.camDip *= Math.exp(-9*dt);
   let sx=0, sy=0;
   if(G.shake>0){ G.shake = Math.max(0, G.shake-dt*1.9);
     sx=(Math.random()-0.5)*G.shake*1.6; sy=(Math.random()-0.5)*G.shake*1.6; }
+  const rush = sk*sk*0.10;                            // 最高速域の微振動
+  sx += (Math.random()-0.5)*rush; sy += (Math.random()-0.5)*rush;
   const cx = G.px + P.camLead;
-  camera.position.set(cx+sx, G.camY+sy, dist);
+  camera.position.set(cx+sx, G.camY - G.camDip + sy, dist);
   camera.lookAt(cx+sx, G.camY-1.05+sy, 0);
   updateFar(cx);
+  recycleForeground(cx, G.camY, sk);
   return cx;
 }
 
@@ -1569,8 +1817,9 @@ function frame(now){
       break;
   }
 
-  /* ヒント表示の減衰 */
+  /* ヒント表示とニアミス表示の減衰 */
   if(G.hintT>0){ G.hintT -= dt; if(G.hintT<=0) UI.hint.classList.remove('show'); }
+  if(G.popT>0){ G.popT -= dt; UI.pop.style.opacity = Math.max(0, Math.min(1, G.popT*2.2)); }
 
   const camX = updateCamera(dt);
   updateRider(dt);
