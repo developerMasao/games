@@ -817,9 +817,9 @@ function applyAtmos(dt, camX, camY){
    端末で初期値を決め、重ければ自動で1段ずつ下げる。G キーで手動切替。 */
 const IS_MOBILE = matchMedia('(hover:none)').matches || 'ontouchstart' in window;
 const QUALITY = [
-  {name:'LOW',  post:false, fx:false, shadows:false, shadowSize:512,  pr:1.0},
-  {name:'MED',  post:true,  fx:false, shadows:true,  shadowSize:1024, pr:1.35},
-  {name:'HIGH', post:true,  fx:true,  shadows:true,  shadowSize:2048, pr:1.75}
+  {name:'LOW',  post:false, fx:false, shadows:false, shadowSize:512,  pr:1.0,  msaa:0},
+  {name:'MED',  post:true,  fx:false, shadows:true,  shadowSize:1024, pr:1.25, msaa:2},
+  {name:'HIGH', post:true,  fx:true,  shadows:true,  shadowSize:2048, pr:1.5,  msaa:4}
 ];
 let qIdx = IS_MOBILE ? 1 : 2, qAuto = true;
 const Q = () => QUALITY[qIdx];
@@ -1006,6 +1006,7 @@ function setQuality(i, manual){
   renderer.shadowMap.enabled = q.shadows;
   if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; }
   sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+  if(rtScene.samples !== undefined && rtScene.samples !== q.msaa){ rtScene.samples = q.msaa; rtScene.dispose(); }
   swapMaterials();
   for(const m of [worldMatHi, propMatHi, worldMatLo, propMatLo, crystalMat]) m.needsUpdate = true;
   resize();
@@ -2493,7 +2494,8 @@ function BigPuffs(n, hole){
   this.uni = { uMap:{value:CLOUD_TEX}, uHole:{value:new THREE.Vector3(0,0,4)}, uHoleOn:{value: hole ? 1 : 0} };
   this.mat = new THREE.ShaderMaterial({ uniforms:this.uni, vertexShader:BPVS, fragmentShader:BPFS,
     transparent:true, depthWrite:false });
-  this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; scene.add(this.mesh);
+  this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; this.mesh.visible = false; scene.add(this.mesh);
+  this.live = 0; this.pending = false;
   this.geo = g;
 }
 /* o: {life, s0, s1, a, g, spin, col, grp(煙の区画), delay} */
@@ -2505,11 +2507,16 @@ BigPuffs.prototype.emit = function(x,y,z, vx,vy,vz, o){
   this.grav[i] = o.g||0; this.spin[i] = o.spin||0; this.rot[i] = Math.random()*6.28;
   this.grp[i] = o.grp==null ? -1 : o.grp; this.age[i] = -(o.delay||0);
   const c = o.col; this.col[i*3]=c.r; this.col[i*3+1]=c.g; this.col[i*3+2]=c.b;
+  this.pending = true;
 };
-BigPuffs.prototype.clear = function(){ this.life.fill(0); this.al.fill(0); this.sz.fill(0); };
+BigPuffs.prototype.clear = function(){ this.life.fill(0); this.al.fill(0); this.sz.fill(0); this.live = 0; this.mesh.visible = false; };
 BigPuffs.prototype.update = function(dt, groupK){
+  if(!this.live && !this.pending) return;           // 何も出ていなければ走査も転送もしない
+  this.pending = false;
+  let live = 0;
   for(let i=0;i<this.n;i++){
     if(this.life[i] <= 0){ if(this.al[i]!==0){ this.al[i]=0; this.sz[i]=0; } continue; }
+    live++;                                          // 出番待ち（age < 0）の煙も数える
     this.age[i] += dt;
     if(this.age[i] < 0){ this.al[i] = 0; continue; }
     const gi = this.grp[i];
@@ -2531,6 +2538,7 @@ BigPuffs.prototype.update = function(dt, groupK){
       this.al[i] = this.a0[i] * (t < 0.12 ? t/0.12 : 1) * (1 - t*t);
     }
   }
+  this.live = live; this.mesh.visible = live > 0;
   const a = this.geo.attributes;
   a.aOff.needsUpdate = a.aSize.needsUpdate = a.aAlpha.needsUpdate = a.aColor.needsUpdate = a.aRot.needsUpdate = true;
 };
@@ -2616,13 +2624,14 @@ function smokeK(i){
 function burstSmoke(zi){
   const z = world.smokes[zi];
   z.state = 'on'; z.t = 0;
-  const cx = z.x0 + 3, n = Math.round((z.x1 - z.x0 + 4)/1.15), layers = IS_MOBILE ? 2 : 3;
+  const cx = z.x0 + 3, n = Math.round((z.x1 - z.x0 + 4)/(IS_MOBILE ? 1.5 : 1.25)), layers = IS_MOBILE ? 1 : 2;
+  const grow = IS_MOBILE ? 1.3 : 1.1;
   for(let k=0;k<n;k++){
     const x = z.x0 - 2 + (k + Math.random()*0.6)*(z.x1 - z.x0 + 4)/n;
     const gy = floorY(x);
     for(let j=0;j<layers;j++){
-      const hy = Math.random(), y = gy - 0.6 + hy*6.4, zz = 1.0 + Math.random()*6.5;
-      const s = 5.0 + Math.random()*3.2;
+      const hy = layers===1 ? 0.25 + Math.random()*0.5 : Math.random(), y = gy - 0.6 + hy*6.4, zz = 1.0 + Math.random()*6.5;
+      const s = (5.0 + Math.random()*3.2)*grow;
       /* 下ほど濃く暗い墨色、上は明るい紫。奥行きが出る */
       _smc.copy(SMOKE_COL).lerp(SMOKE_HI, hy*0.8 + Math.random()*0.2).lerp(AT.fog, 0.22).multiplyScalar(0.85 + 0.25*AT.hemI);
       smokeFx.emit(x, y, zz, (x-cx)*0.25, (Math.random()-0.3)*1.2, 0,
@@ -2948,7 +2957,7 @@ const avChunks = [];
 (function(){
   const geo = new THREE.BoxGeometry(1, 1, 1);
   for(let i=0;i<10;i++){
-    const m = new THREE.Mesh(geo, propMat); m.visible = false; m.castShadow = true;
+    const m = new THREE.Mesh(geo, propMat); m.visible = false;
     scene.add(m); avChunks.push({m, life:0, vx:0, vy:0, vz:0, r:0});
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(new Array(geo.attributes.position.count*3).fill(0.93), 3));
@@ -2960,9 +2969,9 @@ const avWall = (function(){
   const x = cv.getContext('2d'), rnd = mulberry(0xa7a1);
   const g = x.createLinearGradient(0, 0, 0, 256);
   g.addColorStop(0, '#ffffff'); g.addColorStop(0.55, '#e4ecf8'); g.addColorStop(1, '#9aa8c4');
-  x.fillStyle = g; x.fillRect(0, 0, 150, 256);
-  for(let i=0;i<46;i++){
-    const yy = rnd()*256, r = 14 + rnd()*30, xx = 140 + rnd()*70 - r*0.3;
+  x.fillStyle = g; x.fillRect(0, 0, 205, 256);                          // 左 8 割は塗りつぶし
+  for(let i=0;i<40;i++){                                                  // 右端はもこもこ
+    const yy = rnd()*256, r = 10 + rnd()*16, xx = 200 + rnd()*40 - r*0.4;
     x.beginPath(); x.arc(xx, yy, r, 0, Math.PI*2); x.fill();
   }
   for(let i=0;i<24;i++){                                  // 上端もでこぼこに
@@ -2973,7 +2982,7 @@ const avWall = (function(){
   const t = new THREE.CanvasTexture(cv);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map:t, transparent:true,
     depthWrite:false, fog:true}));
-  m.scale.set(46, 30, 1); m.visible = false; m.renderOrder = 4; scene.add(m);
+  m.scale.set(24, 30, 1); m.visible = false; m.renderOrder = 4; scene.add(m);
   return m;
 })();
 function avFire(tr){
@@ -3014,16 +3023,16 @@ function updateAvalanche(dt){
     /* 雪崩の壁：先頭付近に大きな雪煙を吹き出し続ける */
     _avc.copy(snowCol()).multiplyScalar(0.92);
     _avd.copy(_avc).lerp(AT.hemG, 0.45);
-    AV.emitAcc += dt*(IS_MOBILE ? 70 : 110);
+    AV.emitAcc += dt*(IS_MOBILE ? 14 : 24);
     while(AV.emitAcc > 1){
       AV.emitAcc -= 1;
-      const back = Math.random()*6 - 1.5, x = AV.x - back, gy = floorY(x);
-      const hy = Math.pow(Math.random(), 0.7)*17;
-      const s = 5 + Math.random()*5 + hy*0.22;
+      const back = Math.random()*3 - 1, x = AV.x - back, gy = floorY(x);
+      const hy = Math.pow(Math.random(), 0.7)*15;
+      const s = 3.2 + Math.random()*3 + hy*0.12;
       const pour = AV.pourT > 0;
       avFx.emit(x + (pour ? Math.random()*2 : 0), gy - 1 + hy, -6 + Math.random()*13,
         pour ? 4 + Math.random()*4 : vFront*(0.92 + Math.random()*0.12), pour ? -6 - Math.random()*8 : Math.random()*2.5, 0,
-        {life:0.7 + Math.random()*0.5, s0:s*0.7, s1:s*1.4, a:0.92, g:pour ? 14 : 0, spin:(Math.random()-0.5)*1.2,
+        {life:0.55 + Math.random()*0.3, s0:s*0.8, s1:s*1.25, a:0.92, g:pour ? 14 : 0, spin:(Math.random()-0.5)*1.2,
          col: hy < 4 ? _avd : _avc});
     }
     /* 前へ飛び散る雪の塊と細かい光 */
@@ -3042,7 +3051,8 @@ function updateAvalanche(dt){
       avWall.visible = true;
       avWall.material.color.copy(_avc).multiplyScalar(AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : 1);
       avWall.material.opacity = AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : clamp(AV.t*1.5, 0, 1);
-      avWall.position.set(AV.x - 23 + 0.5 + Math.sin(G.t*7)*0.3, wy - 4 + 15 + (AV.pourT > 0 ? -AV.pourT*14 : 0), 4.2);
+      /* 塗りつぶしの右端が先頭のすぐ後ろ、もこもこが先頭の少し前まで来る位置 */
+      avWall.position.set(AV.x - 7.7 + Math.sin(G.t*7)*0.3, wy - 4 + 15 + (AV.pourT > 0 ? -AV.pourT*14 : 0), 1.0);
     }else avWall.visible = false;
     if(Math.random() < 0.6) glows.emit(AV.x + 1.5, floorY(AV.x) + Math.random()*8, Math.random()*4, vFront + 4, Math.random()*3, 0,
       {life:0.4, s0:0.35, s1:0.05, a:0.8, g:3, col:COL.ice});
@@ -3075,7 +3085,7 @@ function updateAvalanche(dt){
   const level = AV.on ? 0.35 + 0.65*AV.k : (AV.rumble > 0 && G.state==='PLAY' ? 0.25 : 0);
   Sound.rumble(G.state==='PLAY' || G.state==='DEAD' ? level : 0);
   if(AV.on && G.state==='PLAY') G.shake = Math.max(G.shake, 0.08 + 0.22*AV.k);
-  UI.aval.style.opacity = (AV.on ? AV.k*0.85 : 0).toFixed(3);
+  UI.aval.style.opacity = (AV.on && G.state==='PLAY' ? 0.25 + AV.k*0.7 : 0).toFixed(3);
 }
 
 /* ================================================= 大詰め
@@ -3108,7 +3118,7 @@ function finaleLand(){
 }
 const silWarm = new THREE.Mesh(SIL_GEO, silMatJump); silWarm.visible = false; scene.add(silWarm);
 const lampWarm = new THREE.Mesh(mineLampGeo, new THREE.MeshBasicMaterial({color:0xff2e5a, fog:false})); lampWarm.visible = false; scene.add(lampWarm);
-function warmList(){ return [crowRig, rvRig, bombMesh, beam, avWall, silWarm, lampWarm, ...avChunks.map(c=>c.m)]; }
+function warmList(){ return [crowRig, rvRig, bombMesh, beam, avWall, silWarm, lampWarm, smokeFx.mesh, avFx.mesh, ...avChunks.map(c=>c.m)]; }
 function resetSetPieces(){
   for(const tr of world.rv) tr.fired = false;
   for(const tr of world.crow) tr.fired = false;
@@ -3628,12 +3638,18 @@ function updatePostFx(dt){
 }
 /* 重ければ1段ずつ下げる（手動で決めたら触らない） */
 const perf = { acc:0, n:0, t:0 };
+/* 60fps を割り続けたら、まず解像度を少しずつ下げ（見た目はほぼ変わらない）、
+   それでも足りなければ画質を1段下げる。自分で選んだ画質（G キー）のときは触らない */
+let prScale = 1;
 function adaptQuality(rawDt){
-  if(!qAuto || G.state!=='PLAY' || G.paused || document.hidden) { perf.acc=0; perf.n=0; perf.t=0; return; }
+  if(!qAuto || G.state!=='PLAY' || G.paused || document.hidden || rawDt > 0.25) { perf.acc=0; perf.n=0; perf.t=0; return; }
   perf.acc += rawDt; perf.n++; perf.t += rawDt;
-  if(perf.t > 2.0){
+  if(perf.t > 1.5){
     const avg = perf.acc/perf.n;
-    if(avg > 0.026 && qIdx > 0) setQuality(qIdx-1, false);
+    if(avg > 0.019){
+      if(prScale > 0.76){ prScale = Math.max(0.75, prScale - 0.125); resize(); }
+      else if(qIdx > 0){ prScale = 0.875; setQuality(qIdx-1, false); }
+    }
     perf.acc=0; perf.n=0; perf.t=0;
   }
 }
@@ -3641,7 +3657,7 @@ function adaptQuality(rawDt){
 /* ================================================== リサイズ・画面向き */
 function resize(){
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, Q().pr));
+  renderer.setPixelRatio(Math.max(0.6, Math.min(window.devicePixelRatio||1, Q().pr) * (typeof prScale==='number' ? prScale : 1)));
   renderer.setSize(w, h);
   sizePost();
   camera.aspect = w/h;
@@ -3660,7 +3676,8 @@ toTitle();
 precompile();
 requestAnimationFrame(frame);
 window.JBR = {G, IN, world, P, CLIMATES, Store, compile, CHUNKS, STAGES, speedAt, inIce, renderer, scene, camera, Sound,
-              sun, setQuality, QUALITY, AT, PF, RV, AV, CROW}; // 調整・検証用
+              sun, setQuality, QUALITY, AT, PF, RV, AV, CROW,
+              fx:{smokeFx, avFx, avWall, snow, glows, puffs, worldGroup, farGroup, skyDome}}; // 調整・検証用
 </script>
 </body>
 </html>
