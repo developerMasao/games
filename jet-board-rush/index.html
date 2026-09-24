@@ -321,14 +321,14 @@ const P = {
 
 /* ======================================================= ステージ部品集
    ent の x は部品内の相対座標。gaps は穴 [開始x, 幅]。
-   t: block(柱/氷塊) low(くぐる) plat(足場) enemy coin coins wear ice hint sign
+   t: block(柱/氷塊) low(くぐる) plat(足場) enemy coin coins wear(未使用) ice hint sign
    これを並べ替えるだけでコースを量産できる。                            */
 const CHUNKS = {
-  /* ---- 導入 8秒。3つの操作を1回ずつ、間延びさせずに教える ---- */
+  /* ---- 導入 8秒。スタート直後は何も置かず（結晶だけ）、3秒後から操作を1つずつ教える ---- */
   teach: {len:84, terrain:[[54,0],['gap',5],[25,0]], ents:[
-    {t:'hint',x:4,icon:'jump'},  {t:'block',x:18,h:1.5,w:1.4},
-    {t:'coins',x:13,y:1.7,n:5,dx:2.6,arc:1.6},
+    {t:'coins',x:10,y:0.9,n:5,dx:2.6},                                   // 滑るだけで取れる
     {t:'hint',x:28,icon:'duck'}, {t:'low',x:42,w:4,y:1.30},
+    {t:'hint',x:44,icon:'jump'},
     {t:'coins',x:38,y:0.65,n:4,dx:2.6},
     {t:'coins',x:52,y:2.0,n:4,dx:2.8,arc:1.4},
     {t:'block',x:72,h:1.4,w:1.4},{t:'coin',x:72,y:2.8}]},
@@ -357,8 +357,7 @@ const CHUNKS = {
     {t:'block',x:94,h:1.7,w:1.5},
     {t:'low',x:118,w:4,y:1.30},
     {t:'coins',x:22,y:0.65,n:3,dx:2.6},{t:'coins',x:70,y:0.65,n:4,dx:2.6},
-    {t:'coin',x:42,y:2.9},{t:'coin',x:94,y:3.0},
-    {t:'wear',x:106,y:2.0}]},
+    {t:'coin',x:42,y:2.9},{t:'coin',x:94,y:3.0}]},
 
   /* ---- 波3：氷結。ブレーキが効かないまま密集地帯へ ---- */
   w3_ice: {len:134, terrain:[[26,-4],[78,0],['gap',8],[22,0]], ents:[
@@ -403,7 +402,6 @@ const CHUNKS = {
     {t:'coins',x:50,y:4.6,n:4,dx:2.9},{t:'coins',x:64,y:4.6,n:4,dx:2.9},
     {t:'coins',x:80,y:4.6,n:4,dx:2.9},{t:'coins',x:96,y:4.6,n:4,dx:2.9},
     {t:'block',x:58,h:1.5,w:1.4},{t:'block',x:88,h:1.5,w:1.4},   // 下の道
-    {t:'wear',x:112,y:2.0},
     {t:'aval',x:120,a:'rumble'},                                         // 山が鳴り始める
     {t:'coins',x:124,y:1.5,n:4,dx:3.4},{t:'coins',x:148,y:1.5,n:4,dx:3.4}]},
 
@@ -2191,11 +2189,10 @@ function computeScore(g, cleared){
   const trickPts = g.tricks*150;
   const stompPts = (g.stomps||0)*500;
   const distPts = Math.floor(g.dist)*3;
-  const clearB  = cleared ? 3000 : 0;
+  const clearB  = cleared ? 5500 : 0;              // 1ミスで終わるので、クリア＝ノーダメージ
   const timeB   = cleared ? Math.max(0, Math.round((115 - g.timeMs/1000)*80)) : 0;
-  const dmgB    = cleared ? (g.dmg===0 ? 2500 : (g.dmg===1 ? 900 : 0)) : 0;
-  return {coinPts, nearPts, trickPts, stompPts, distPts, clearB, timeB, dmgB,
-          total:coinPts+nearPts+trickPts+stompPts+distPts+clearB+timeB+dmgB};
+  return {coinPts, nearPts, trickPts, stompPts, distPts, clearB, timeB,
+          total:coinPts+nearPts+trickPts+stompPts+distPts+clearB+timeB};
 }
 const fmtTime = ms => (ms/1000).toFixed(2)+'s';
 
@@ -2352,20 +2349,12 @@ function nearMiss(x, y){
 /* --------------------------------------------------------- 被弾・死亡 */
 function flash(a){ UI.flash.style.transition='none'; UI.flash.style.opacity=a;
   requestAnimationFrame(()=>{ UI.flash.style.transition='opacity .35s'; UI.flash.style.opacity=0; }); }
+/* 1ミスで終わり。当たった瞬間に止めて、何に当たったかを見せる */
 function hurt(){
   if(G.invuln>0 || G.state!=='PLAY') return;
-  G.dmg++;
-  if(G.clothes){
-    G.clothes = false;
-    for(const c of rider.userData.clothes) c.visible = false;
-    emitDebris(G.px, G.py+1.0, 0);
-    G.invuln = P.invuln; G.hitT = P.hitTime; G.shake = 0.55;
-    G.hitStop = 0.09; buzz(60); G.flip = -1;
-    G.boost = Math.max(P.boostMin, G.boost - P.boostHit);
-    flash(0.45); Sound.hurt();
-  }else{
-    die();
-  }
+  G.dmg++; G.flip = -1;
+  Sound.hurt(); emitSpark(G.px + 0.6, G.py + 1.0);
+  die();
 }
 function die(){
   if(G.state!=='PLAY') return;
@@ -2408,7 +2397,6 @@ function showResult(cleared){
   if(cleared){
     rows.push(['GOAL', '+'+sc.clearB.toLocaleString()]);
     if(sc.timeB) rows.push(['SPEED', '+'+sc.timeB.toLocaleString()]);
-    if(sc.dmgB)  rows.push([G.dmg===0?'NO DAMAGE':'ONLY ONCE', '+'+sc.dmgB.toLocaleString()]);
   }
   UI.sheet.innerHTML = rows.map(r=>`<div class="l">${r[0]}</div><div class="v">${r[1]}</div>`).join('');
   const isNew = !prevBest || sc.total > prevBest.score;
