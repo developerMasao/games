@@ -2186,12 +2186,17 @@ document.getElementById('sound').addEventListener('click', ()=>{ Sound.unlock();
 
 /* ============================================================ スコア保存
    将来のランキング用に、1プレイ = 1レコードの形で持っておく。         */
+const COURSE_ID = () => Math.round(world.goalX);          // コースの版（ゴールまでの距離）
 const Store = {
   key:'jetboardrush.records.v1',
   all(){ try{ return JSON.parse(localStorage.getItem(this.key)||'[]'); }catch(e){ return []; } },
   add(rec){ try{ const a=this.all(); a.push(rec); a.sort((x,y)=>y.score-x.score);
                  localStorage.setItem(this.key, JSON.stringify(a.slice(0,20))); }catch(e){} },
-  best(){ const a=this.all(); return a.length ? a[0] : null; },
+  /* コースを作り直すと距離もタイムも比べられないので、同じコースの記録だけを比べる。
+     course が無い古い記録は、クリアしていてゴール距離が同じものだけ今のコースとみなす */
+  mine(){ const c = COURSE_ID(); return this.all().filter(r => r.course!==undefined ? r.course===c
+            : (r.cleared && Math.abs((r.distance||0) - c) <= 2)); },
+  best(){ const a=this.mine(); return a.length ? a[0] : null; },
   cleared(){ return this.all().some(r=>r.cleared); }
 };
 /* ゴースト：一番速くクリアした走りを 20Hz で記録して、半透明で並走させる */
@@ -2212,7 +2217,7 @@ function recordGhost(){
 function makeRecord(g, sc, cleared){
   return { v:1, game:'jet-board-rush', stage:g.world.id, climate:g.world.climate,
            cleared:cleared, score:sc.total, timeMs:Math.round(g.timeMs),
-           coins:g.coins, near:g.near, tricks:g.tricks, stomps:g.stomps||0, distance:Math.round(g.dist), damage:g.dmg,
+           course:COURSE_ID(), coins:g.coins, near:g.near, tricks:g.tricks, stomps:g.stomps||0, distance:Math.round(g.dist), damage:g.dmg,
            at:new Date().toISOString() };
 }
 function computeScore(g, cleared){
@@ -2409,7 +2414,7 @@ function showResult(cleared){
   const sc = computeScore(G, cleared);
   const rec = makeRecord(G, sc, cleared);
   const prevBest = Store.best();
-  const prevClears = Store.all().filter(r=>r.cleared);
+  const prevClears = Store.mine().filter(r=>r.cleared);
   const prevBestTime = prevClears.length ? Math.min(...prevClears.map(r=>r.timeMs)) : null;
   Store.add(rec);
   /* 最速クリアならゴーストを更新 */
@@ -3751,17 +3756,27 @@ function updatePostFx(dt){
 /* 重ければ1段ずつ下げる（手動で決めたら触らない） */
 const perf = { acc:0, n:0, t:0 };
 /* 60fps を割り続けたら、まず解像度を少しずつ下げ（見た目はほぼ変わらない）、
-   それでも足りなければ画質を1段下げる。自分で選んだ画質（G キー）のときは触らない */
-let prScale = 1;
+   それでも足りなければ画質を1段下げる。自分で選んだ画質（G キー）のときは触らない。
+   切り替えるたびに描画の作り直しで一瞬止まるので、プレイ中には切り替えない：
+   タイトル画面（デモ走行中）なら即座に、プレイ中に重いと分かったら、ミスした後・
+   結果画面・ポーズ中まで待って切り替える。30fps を大きく割るときだけは待たない。 */
+let prScale = 1, adaptPending = 0;
+function adaptStep(){
+  if(prScale > 0.76){ prScale = Math.max(0.75, prScale - 0.125); resize(); }
+  else if(qIdx > 0){ prScale = 0.875; setQuality(qIdx-1, false); }
+}
 function adaptQuality(rawDt){
-  if(!qAuto || G.state!=='PLAY' || G.paused || document.hidden || rawDt > 0.25) { perf.acc=0; perf.n=0; perf.t=0; return; }
+  if(!qAuto) return;
+  const calm = G.paused || G.state==='RESULT' || G.state==='TITLE' || (G.state==='DEAD' && G.deadT > 0.2);
+  if(adaptPending && calm){ adaptPending--; adaptStep(); perf.acc=0; perf.n=0; perf.t=0; return; }
+  const measure = (G.state==='PLAY' || G.state==='TITLE') && !G.paused && !document.hidden && rawDt < 0.25;
+  if(!measure){ perf.acc=0; perf.n=0; perf.t=0; return; }
   perf.acc += rawDt; perf.n++; perf.t += rawDt;
   if(perf.t > 1.5){
     const avg = perf.acc/perf.n;
-    if(avg > 0.019){
-      if(prScale > 0.76){ prScale = Math.max(0.75, prScale - 0.125); resize(); }
-      else if(qIdx > 0){ prScale = 0.875; setQuality(qIdx-1, false); }
-    }
+    if(G.state==='TITLE'){ if(avg > 0.019) adaptStep(); }
+    else if(avg > 0.040) adaptStep();                                  // 25fps 未満：待たずに軽くする
+    else if(avg > 0.019) adaptPending = Math.min(2, adaptPending + 1); // 次の落ち着いた瞬間に軽くする
     perf.acc=0; perf.n=0; perf.t=0;
   }
 }
