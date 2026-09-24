@@ -51,6 +51,26 @@
         text-shadow:0 0 26px rgba(120,220,255,.95),0 4px 10px rgba(0,0,0,.6);}
   #hint .cap{margin-top:6px;font-size:clamp(11px,2.2vh,15px);letter-spacing:.32em;color:#bfe7ff;opacity:.9;}
   #hint.show{opacity:1;}
+  /* 操作の合図（右下）。外の輪が縮みきった瞬間が押すタイミング */
+  #cue{position:fixed;right:calc(4vw + env(safe-area-inset-right));bottom:calc(15vh + env(safe-area-inset-bottom));
+       z-index:12;pointer-events:none;display:flex;align-items:center;gap:12px;opacity:0;
+       transform:translateX(12px);transition:opacity .12s,transform .12s;}
+  #cue.show{opacity:1;transform:none;}
+  #cue .dial{position:relative;width:clamp(54px,12vh,86px);height:clamp(54px,12vh,86px);}
+  #cue .core{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;
+             font-weight:900;font-size:clamp(24px,6vh,40px);color:#fff;background:rgba(10,24,44,.55);
+             border:3px solid currentColor;text-shadow:0 2px 6px rgba(0,0,0,.5);}
+  #cue .ring{position:absolute;inset:0;border-radius:50%;border:3px solid currentColor;opacity:.75;}
+  #cue .word{font-weight:900;font-size:clamp(18px,4.6vh,32px);letter-spacing:.06em;color:#fff;
+             text-shadow:0 2px 8px rgba(0,0,0,.6);white-space:nowrap;}
+  #cue.jump{color:#ffd23f;} #cue.duck{color:#5fe0ff;} #cue.stay{color:#ff4a6a;}
+  #cue.now .core{background:currentColor;color:#0a1830;text-shadow:none;animation:cuepop .22s ease-out;}
+  @keyframes cuepop{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+  #cueBtn{position:fixed;z-index:14;right:calc(52px + env(safe-area-inset-right));
+          bottom:calc(10px + env(safe-area-inset-bottom));height:34px;padding:0 10px;border-radius:17px;
+          border:1px solid rgba(150,215,255,.3);background:rgba(8,22,40,.45);color:#bfe3ff;
+          font-size:12px;letter-spacing:.12em;line-height:32px;cursor:pointer;opacity:.5;}
+  #cueBtn:hover{opacity:1;} #cueBtn.off{text-decoration:line-through;opacity:.35;}
 
   /* ---- 全画面オーバーレイ ---- */
   .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
@@ -187,6 +207,8 @@
 <div id="split"></div>
 <div id="go">GO!</div>
 <div id="hint"><div class="glyph" id="hintGlyph">▲</div><div class="cap" id="hintCap"></div></div>
+<div id="cue"><div class="dial"><div class="ring" id="cueRing"></div><div class="core" id="cueGlyph">▲</div></div>
+  <div class="word" id="cueWord">ジャンプ</div></div>
 
 <div id="title" class="screen">
   <div class="logo">JET BOARD<br>RUSH<em>FROST RIDGE</em></div>
@@ -210,6 +232,7 @@
 <div id="orient"><div class="ph"></div><p>横向きにしてください</p></div>
 <div id="pauseNote" class="show" style="display:none">PAUSE<small>ESC で再開 ／ R でやり直し</small></div>
 <div id="sound">♪</div>
+<div id="cueBtn">合図</div>
 <div id="qnote"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -327,8 +350,7 @@ const CHUNKS = {
   /* ---- 導入 8秒。スタート直後は何も置かず（結晶だけ）、3秒後から操作を1つずつ教える ---- */
   teach: {len:84, terrain:[[54,0],['gap',5],[25,0]], ents:[
     {t:'coins',x:10,y:0.9,n:5,dx:2.6},                                   // 滑るだけで取れる
-    {t:'hint',x:28,icon:'duck'}, {t:'low',x:42,w:4,y:1.30},
-    {t:'hint',x:44,icon:'jump'},
+    {t:'low',x:42,w:4,y:1.30},
     {t:'coins',x:38,y:0.65,n:4,dx:2.6},
     {t:'coins',x:52,y:2.0,n:4,dx:2.8,arc:1.4},
     {t:'block',x:72,h:1.4,w:1.4},{t:'coin',x:72,y:2.8}]},
@@ -817,9 +839,9 @@ function applyAtmos(dt, camX, camY){
    端末で初期値を決め、重ければ自動で1段ずつ下げる。G キーで手動切替。 */
 const IS_MOBILE = matchMedia('(hover:none)').matches || 'ontouchstart' in window;
 const QUALITY = [
-  {name:'LOW',  post:false, fx:false, shadows:false, shadowSize:512,  pr:1.0},
-  {name:'MED',  post:true,  fx:false, shadows:true,  shadowSize:1024, pr:1.35},
-  {name:'HIGH', post:true,  fx:true,  shadows:true,  shadowSize:2048, pr:1.75}
+  {name:'LOW',  post:false, fx:false, shadows:false, shadowSize:512,  pr:1.0,  msaa:0},
+  {name:'MED',  post:true,  fx:false, shadows:true,  shadowSize:1024, pr:1.25, msaa:2},
+  {name:'HIGH', post:true,  fx:true,  shadows:true,  shadowSize:2048, pr:1.5,  msaa:4}
 ];
 let qIdx = IS_MOBILE ? 1 : 2, qAuto = true;
 const Q = () => QUALITY[qIdx];
@@ -1006,6 +1028,7 @@ function setQuality(i, manual){
   renderer.shadowMap.enabled = q.shadows;
   if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; }
   sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+  if(rtScene.samples !== undefined && rtScene.samples !== q.msaa){ rtScene.samples = q.msaa; rtScene.dispose(); }
   swapMaterials();
   for(const m of [worldMatHi, propMatHi, worldMatLo, propMatLo, crystalMat]) m.needsUpdate = true;
   resize();
@@ -1794,6 +1817,7 @@ addEventListener('keydown', e=>{
   if(e.code==='Escape'){ togglePause(); return; }
   if(e.code==='KeyM'){ Sound.toggle(); return; }
   if(e.code==='KeyG'){ setQuality((qIdx+1) % QUALITY.length, true); return; }
+  if(e.code==='KeyC'){ setCueOn(!CUE.on); return; }
   if(e.code==='KeyR' && (G.state==='PLAY' || G.state==='DEAD' || (G.state==='RESULT' && G.resultT > 0.3))){
     startGame(true); return; }
   const r = keyRole(e.code);
@@ -1819,7 +1843,7 @@ function syncInput(){
 }
 function onDown(e){
   const t = e.target;
-  if(t && t.id==='sound') return;
+  if(t && (t.id==='sound' || t.id==='cueBtn')) return;
   e.preventDefault();
   IN.anyPress = true;
   if(!pointers.size) Sound.unlock();
@@ -2044,6 +2068,14 @@ const Sound = {
   firework(){ if(!this.ready||!this.on) return; const t=this.now();
     this.noiseHit(t, 0.08, 0.22, 'lowpass', 2500, 400);
     for(let i=0;i<5;i++) this.noiseHit(t+0.1+Math.random()*0.35, 0.03, 0.07, 'highpass', 6000, null, null, true); },
+  /* 合図：出たときは小さく、押す瞬間にはっきり鳴らす */
+  cueIn(){ if(!this.ready||!this.on) return; this.tone(1760, 0.04, 'sine', 0.035); },
+  cueJump(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(988, 0.06, 'square', 0.10, null, t); this.tone(1480, 0.08, 'square', 0.10, null, t+0.06); },
+  cueDuck(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(660, 0.06, 'square', 0.10, null, t); this.tone(440, 0.10, 'square', 0.10, null, t+0.06); },
+  cueStay(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(220, 0.09, 'sawtooth', 0.10, null, t); this.tone(220, 0.09, 'sawtooth', 0.10, null, t+0.13); },
   rumble(level){ if(!this.ready) return;
     this.rumbleG.gain.setTargetAtTime(this.on ? level*0.6 : 0, this.ctx.currentTime, 0.15); },
 
@@ -2278,6 +2310,7 @@ function resetRun(state){
   for(const e of world.enemies){ e.x=e.home; e.alive=true; e.ph=Math.random()*6.28;
     if(e.mesh){ scene.remove(e.mesh); e.mesh=null; } }
   resetSetPieces();
+  if(typeof resetCues==='function') resetCues();
   for(const h of world.hints) h.fired = Store.cleared();     // 一度クリアしたら出さない
   for(const c of rider.userData.clothes) c.visible = true;
   rider.visible = true; rider.rotation.set(0,0,0);
@@ -2493,7 +2526,8 @@ function BigPuffs(n, hole){
   this.uni = { uMap:{value:CLOUD_TEX}, uHole:{value:new THREE.Vector3(0,0,4)}, uHoleOn:{value: hole ? 1 : 0} };
   this.mat = new THREE.ShaderMaterial({ uniforms:this.uni, vertexShader:BPVS, fragmentShader:BPFS,
     transparent:true, depthWrite:false });
-  this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; scene.add(this.mesh);
+  this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; this.mesh.visible = false; scene.add(this.mesh);
+  this.live = 0; this.pending = false;
   this.geo = g;
 }
 /* o: {life, s0, s1, a, g, spin, col, grp(煙の区画), delay} */
@@ -2505,11 +2539,16 @@ BigPuffs.prototype.emit = function(x,y,z, vx,vy,vz, o){
   this.grav[i] = o.g||0; this.spin[i] = o.spin||0; this.rot[i] = Math.random()*6.28;
   this.grp[i] = o.grp==null ? -1 : o.grp; this.age[i] = -(o.delay||0);
   const c = o.col; this.col[i*3]=c.r; this.col[i*3+1]=c.g; this.col[i*3+2]=c.b;
+  this.pending = true;
 };
-BigPuffs.prototype.clear = function(){ this.life.fill(0); this.al.fill(0); this.sz.fill(0); };
+BigPuffs.prototype.clear = function(){ this.life.fill(0); this.al.fill(0); this.sz.fill(0); this.live = 0; this.mesh.visible = false; };
 BigPuffs.prototype.update = function(dt, groupK){
+  if(!this.live && !this.pending) return;           // 何も出ていなければ走査も転送もしない
+  this.pending = false;
+  let live = 0;
   for(let i=0;i<this.n;i++){
     if(this.life[i] <= 0){ if(this.al[i]!==0){ this.al[i]=0; this.sz[i]=0; } continue; }
+    live++;                                          // 出番待ち（age < 0）の煙も数える
     this.age[i] += dt;
     if(this.age[i] < 0){ this.al[i] = 0; continue; }
     const gi = this.grp[i];
@@ -2531,6 +2570,7 @@ BigPuffs.prototype.update = function(dt, groupK){
       this.al[i] = this.a0[i] * (t < 0.12 ? t/0.12 : 1) * (1 - t*t);
     }
   }
+  this.live = live; this.mesh.visible = live > 0;
   const a = this.geo.attributes;
   a.aOff.needsUpdate = a.aSize.needsUpdate = a.aAlpha.needsUpdate = a.aColor.needsUpdate = a.aRot.needsUpdate = true;
 };
@@ -2616,13 +2656,14 @@ function smokeK(i){
 function burstSmoke(zi){
   const z = world.smokes[zi];
   z.state = 'on'; z.t = 0;
-  const cx = z.x0 + 3, n = Math.round((z.x1 - z.x0 + 4)/1.15), layers = IS_MOBILE ? 2 : 3;
+  const cx = z.x0 + 3, n = Math.round((z.x1 - z.x0 + 4)/(IS_MOBILE ? 1.5 : 1.25)), layers = IS_MOBILE ? 1 : 2;
+  const grow = IS_MOBILE ? 1.3 : 1.1;
   for(let k=0;k<n;k++){
     const x = z.x0 - 2 + (k + Math.random()*0.6)*(z.x1 - z.x0 + 4)/n;
     const gy = floorY(x);
     for(let j=0;j<layers;j++){
-      const hy = Math.random(), y = gy - 0.6 + hy*6.4, zz = 1.0 + Math.random()*6.5;
-      const s = 5.0 + Math.random()*3.2;
+      const hy = layers===1 ? 0.25 + Math.random()*0.5 : Math.random(), y = gy - 0.6 + hy*6.4, zz = 1.0 + Math.random()*6.5;
+      const s = (5.0 + Math.random()*3.2)*grow;
       /* 下ほど濃く暗い墨色、上は明るい紫。奥行きが出る */
       _smc.copy(SMOKE_COL).lerp(SMOKE_HI, hy*0.8 + Math.random()*0.2).lerp(AT.fog, 0.22).multiplyScalar(0.85 + 0.25*AT.hemI);
       smokeFx.emit(x, y, zz, (x-cx)*0.25, (Math.random()-0.3)*1.2, 0,
@@ -2948,7 +2989,7 @@ const avChunks = [];
 (function(){
   const geo = new THREE.BoxGeometry(1, 1, 1);
   for(let i=0;i<10;i++){
-    const m = new THREE.Mesh(geo, propMat); m.visible = false; m.castShadow = true;
+    const m = new THREE.Mesh(geo, propMat); m.visible = false;
     scene.add(m); avChunks.push({m, life:0, vx:0, vy:0, vz:0, r:0});
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(new Array(geo.attributes.position.count*3).fill(0.93), 3));
@@ -2960,9 +3001,9 @@ const avWall = (function(){
   const x = cv.getContext('2d'), rnd = mulberry(0xa7a1);
   const g = x.createLinearGradient(0, 0, 0, 256);
   g.addColorStop(0, '#ffffff'); g.addColorStop(0.55, '#e4ecf8'); g.addColorStop(1, '#9aa8c4');
-  x.fillStyle = g; x.fillRect(0, 0, 150, 256);
-  for(let i=0;i<46;i++){
-    const yy = rnd()*256, r = 14 + rnd()*30, xx = 140 + rnd()*70 - r*0.3;
+  x.fillStyle = g; x.fillRect(0, 0, 205, 256);                          // 左 8 割は塗りつぶし
+  for(let i=0;i<40;i++){                                                  // 右端はもこもこ
+    const yy = rnd()*256, r = 10 + rnd()*16, xx = 200 + rnd()*40 - r*0.4;
     x.beginPath(); x.arc(xx, yy, r, 0, Math.PI*2); x.fill();
   }
   for(let i=0;i<24;i++){                                  // 上端もでこぼこに
@@ -2973,7 +3014,7 @@ const avWall = (function(){
   const t = new THREE.CanvasTexture(cv);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map:t, transparent:true,
     depthWrite:false, fog:true}));
-  m.scale.set(46, 30, 1); m.visible = false; m.renderOrder = 4; scene.add(m);
+  m.scale.set(24, 30, 1); m.visible = false; m.renderOrder = 4; scene.add(m);
   return m;
 })();
 function avFire(tr){
@@ -3014,16 +3055,16 @@ function updateAvalanche(dt){
     /* 雪崩の壁：先頭付近に大きな雪煙を吹き出し続ける */
     _avc.copy(snowCol()).multiplyScalar(0.92);
     _avd.copy(_avc).lerp(AT.hemG, 0.45);
-    AV.emitAcc += dt*(IS_MOBILE ? 70 : 110);
+    AV.emitAcc += dt*(IS_MOBILE ? 14 : 24);
     while(AV.emitAcc > 1){
       AV.emitAcc -= 1;
-      const back = Math.random()*6 - 1.5, x = AV.x - back, gy = floorY(x);
-      const hy = Math.pow(Math.random(), 0.7)*17;
-      const s = 5 + Math.random()*5 + hy*0.22;
+      const back = Math.random()*3 - 1, x = AV.x - back, gy = floorY(x);
+      const hy = Math.pow(Math.random(), 0.7)*15;
+      const s = 3.2 + Math.random()*3 + hy*0.12;
       const pour = AV.pourT > 0;
       avFx.emit(x + (pour ? Math.random()*2 : 0), gy - 1 + hy, -6 + Math.random()*13,
         pour ? 4 + Math.random()*4 : vFront*(0.92 + Math.random()*0.12), pour ? -6 - Math.random()*8 : Math.random()*2.5, 0,
-        {life:0.7 + Math.random()*0.5, s0:s*0.7, s1:s*1.4, a:0.92, g:pour ? 14 : 0, spin:(Math.random()-0.5)*1.2,
+        {life:0.55 + Math.random()*0.3, s0:s*0.8, s1:s*1.25, a:0.92, g:pour ? 14 : 0, spin:(Math.random()-0.5)*1.2,
          col: hy < 4 ? _avd : _avc});
     }
     /* 前へ飛び散る雪の塊と細かい光 */
@@ -3042,7 +3083,8 @@ function updateAvalanche(dt){
       avWall.visible = true;
       avWall.material.color.copy(_avc).multiplyScalar(AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : 1);
       avWall.material.opacity = AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : clamp(AV.t*1.5, 0, 1);
-      avWall.position.set(AV.x - 23 + 0.5 + Math.sin(G.t*7)*0.3, wy - 4 + 15 + (AV.pourT > 0 ? -AV.pourT*14 : 0), 4.2);
+      /* 塗りつぶしの右端が先頭のすぐ後ろ、もこもこが先頭の少し前まで来る位置 */
+      avWall.position.set(AV.x - 7.7 + Math.sin(G.t*7)*0.3, wy - 4 + 15 + (AV.pourT > 0 ? -AV.pourT*14 : 0), 1.0);
     }else avWall.visible = false;
     if(Math.random() < 0.6) glows.emit(AV.x + 1.5, floorY(AV.x) + Math.random()*8, Math.random()*4, vFront + 4, Math.random()*3, 0,
       {life:0.4, s0:0.35, s1:0.05, a:0.8, g:3, col:COL.ice});
@@ -3075,7 +3117,7 @@ function updateAvalanche(dt){
   const level = AV.on ? 0.35 + 0.65*AV.k : (AV.rumble > 0 && G.state==='PLAY' ? 0.25 : 0);
   Sound.rumble(G.state==='PLAY' || G.state==='DEAD' ? level : 0);
   if(AV.on && G.state==='PLAY') G.shake = Math.max(G.shake, 0.08 + 0.22*AV.k);
-  UI.aval.style.opacity = (AV.on ? AV.k*0.85 : 0).toFixed(3);
+  UI.aval.style.opacity = (AV.on && G.state==='PLAY' ? 0.25 + AV.k*0.7 : 0).toFixed(3);
 }
 
 /* ================================================= 大詰め
@@ -3108,7 +3150,7 @@ function finaleLand(){
 }
 const silWarm = new THREE.Mesh(SIL_GEO, silMatJump); silWarm.visible = false; scene.add(silWarm);
 const lampWarm = new THREE.Mesh(mineLampGeo, new THREE.MeshBasicMaterial({color:0xff2e5a, fog:false})); lampWarm.visible = false; scene.add(lampWarm);
-function warmList(){ return [crowRig, rvRig, bombMesh, beam, avWall, silWarm, lampWarm, ...avChunks.map(c=>c.m)]; }
+function warmList(){ return [crowRig, rvRig, bombMesh, beam, avWall, silWarm, lampWarm, smokeFx.mesh, avFx.mesh, ...avChunks.map(c=>c.m)]; }
 function resetSetPieces(){
   for(const tr of world.rv) tr.fired = false;
   for(const tr of world.crow) tr.fired = false;
@@ -3136,6 +3178,85 @@ function updateSetPieces(dt){
   }
   smokeFx.update(dt, smokeK);
   avFx.update(dt, smokeK);
+}
+
+/* ====================================================== 操作の合図（右下）
+   コースのデータから「いつ何をするか」を計算して出す。障害物と穴の位置は
+   コードが全部知っているので、ランダム生成のコースでも同じ仕組みで正確に出せる。
+   外の輪が縮みきった瞬間が押すタイミングで、そのとき音が鳴る。 */
+const CUE_T = { jump:0.26, gap:0.09, duck:0.36, stomp:0.40 };   // 押す瞬間（当たる何秒前か）
+const CUE_LEAD = 0.70;                                          // その何秒前から出すか
+const CUE_TXT = {
+  jump:{g:'▲', w:'ジャンプ', cls:'jump'}, gap:{g:'▲', w:'ジャンプ', cls:'jump'}, stomp:{g:'▲', w:'ふめ！', cls:'jump'},
+  duck:{g:'▼', w:'しゃがめ', cls:'duck'}, stay:{g:'✕', w:'跳ぶな', cls:'stay'} };
+const CUE = { on:true, idx:0, list:[], cur:null, key:'', nowKey:'', nowT:0 };
+try{ CUE.on = localStorage.getItem('jetboardrush.cue') !== '0'; }catch(e){}
+const cueEl = el('cue'), cueRing = el('cueRing'), cueGlyph = el('cueGlyph'), cueWord = el('cueWord'), cueBtn = el('cueBtn');
+function buildCues(W){
+  const L = [];
+  for(const h of W.hazards) L.push({kind: h.type==='low' ? 'duck' : 'jump', x:h.x0, x1:h.x1, id:'h'+L.length});
+  const gr = W.surfaces.filter(s=>s.kind==='ground').sort((a,b)=>a.x0-b.x0);
+  for(let i=0;i<gr.length-1;i++) if(gr[i+1].x0 - gr[i].x1 > 0.5) L.push({kind:'gap', x:gr[i].x1, x1:gr[i+1].x0, id:'g'+i});
+  return L.sort((a,b)=>a.x-b.x);
+}
+CUE.list = buildCues(world);
+function setCueOn(on){
+  CUE.on = on; try{ localStorage.setItem('jetboardrush.cue', on ? '1' : '0'); }catch(e){}
+  cueBtn.classList.toggle('off', !on);
+  if(!on) cueEl.classList.remove('show');
+}
+cueBtn.addEventListener('click', e=>{ e.stopPropagation(); setCueOn(!CUE.on); });
+cueBtn.addEventListener('pointerdown', e=>e.stopPropagation());
+setCueOn(CUE.on);
+function resetCues(){ CUE.idx = 0; CUE.cur = null; CUE.key = ''; CUE.nowKey = ''; cueEl.classList.remove('show','now'); }
+/* 次にやるべきことを1つ選ぶ（押す瞬間までの残り秒 t が一番小さいもの） */
+function pickCue(){
+  const v = Math.max(1, G.speed), px = G.px;
+  let best = null;
+  const consider = (kind, x, x1, id, vr) => {
+    const rel = vr || v;
+    const t = (x - px)/rel - CUE_T[kind];
+    if(kind==='duck'){ if(px > x1 + 0.3 || t > CUE_LEAD) return; }
+    else if(t < -0.18 || t > CUE_LEAD) return;
+    if(!best || t < best.t) best = {kind, t, id};
+  };
+  const L = CUE.list;
+  while(CUE.idx < L.length && L[CUE.idx].x1 < px - 1) CUE.idx++;
+  for(let i=CUE.idx; i<L.length && L[i].x - px < v*(CUE_LEAD+0.5) + 2; i++){
+    const c = L[i]; consider(c.kind, c.x, c.x1, c.id);
+  }
+  for(let i=0;i<world.mines.length;i++){ const m = world.mines[i];
+    if(m.state==='on' || m.state==='fall') consider('jump', m.x-0.55, m.x+0.55, 'm'+i); }
+  for(const e of world.enemies){
+    const d = ENEMY_DEF[e.kind];
+    if(e.kind==='flyer') consider('duck', e.x - d.w/2, e.x + d.w/2, 'e'+e.id, v + d.spd);
+    else consider('jump', e.x - d.w/2, e.x + d.w/2, 'e'+e.id, v + d.spd);
+  }
+  if(RV.on && RV.ph==='block' && Math.abs(RV.z) < 0.6) consider('stomp', RV.x - 1, RV.x + 1, 'rv'+RV.at, v*0.7);
+  /* 頭上に張りつかれている間は「跳ぶな」を最優先（穴が迫っていなければ） */
+  if(RV.on && RV.ph==='hover' && Math.abs(RV.x - px) < 3 && !(best && best.kind==='gap' && best.t < 0.3))
+    best = {kind:'stay', t:0, id:'hover'+RV.to};
+  return best;
+}
+function updateCue(dt){
+  if(!CUE.on || G.state!=='PLAY' || G.paused){ if(cueEl.classList.contains('show')) cueEl.classList.remove('show'); return; }
+  const c = pickCue();
+  if(!c){ if(CUE.cur){ cueEl.classList.remove('show'); CUE.cur = null; } return; }
+  const T = CUE_TXT[c.kind];
+  if(CUE.key !== c.id){
+    CUE.key = c.id; CUE.cur = c;
+    cueEl.className = 'show ' + T.cls; cueGlyph.textContent = T.g; cueWord.textContent = T.w;
+    if(c.kind==='stay') Sound.cueStay(); else Sound.cueIn();
+  }
+  /* 輪が縮みきったら押す */
+  const k = c.kind==='stay' ? 0 : clamp(c.t/CUE_LEAD, 0, 1);
+  cueRing.style.transform = 'scale(' + (1 + k*0.9).toFixed(3) + ')';
+  cueRing.style.opacity = (0.35 + (1-k)*0.6).toFixed(2);
+  if(c.t <= 0 && CUE.nowKey !== c.id && c.kind!=='stay'){
+    CUE.nowKey = c.id; cueEl.classList.add('now');
+    if(c.kind==='duck') Sound.cueDuck(); else Sound.cueJump();
+  }
+  if(CUE.nowKey !== c.id) cueEl.classList.remove('now');
 }
 
 /* ======================================================== ゲーム進行 */
@@ -3599,6 +3720,7 @@ function frame(now){
   if(G.splitT > 0){ G.splitT -= dt; if(G.splitT <= 0) UI.split.style.opacity = 0; }
   updateEnemies(dt);
   updateSetPieces(dt);
+  updateCue(dt);
   updateItems(dt);
   updateParticles(dt, camX, G.camY);
   if(G.state==='PLAY' && !G.paused){
@@ -3628,12 +3750,18 @@ function updatePostFx(dt){
 }
 /* 重ければ1段ずつ下げる（手動で決めたら触らない） */
 const perf = { acc:0, n:0, t:0 };
+/* 60fps を割り続けたら、まず解像度を少しずつ下げ（見た目はほぼ変わらない）、
+   それでも足りなければ画質を1段下げる。自分で選んだ画質（G キー）のときは触らない */
+let prScale = 1;
 function adaptQuality(rawDt){
-  if(!qAuto || G.state!=='PLAY' || G.paused || document.hidden) { perf.acc=0; perf.n=0; perf.t=0; return; }
+  if(!qAuto || G.state!=='PLAY' || G.paused || document.hidden || rawDt > 0.25) { perf.acc=0; perf.n=0; perf.t=0; return; }
   perf.acc += rawDt; perf.n++; perf.t += rawDt;
-  if(perf.t > 2.0){
+  if(perf.t > 1.5){
     const avg = perf.acc/perf.n;
-    if(avg > 0.026 && qIdx > 0) setQuality(qIdx-1, false);
+    if(avg > 0.019){
+      if(prScale > 0.76){ prScale = Math.max(0.75, prScale - 0.125); resize(); }
+      else if(qIdx > 0){ prScale = 0.875; setQuality(qIdx-1, false); }
+    }
     perf.acc=0; perf.n=0; perf.t=0;
   }
 }
@@ -3641,7 +3769,7 @@ function adaptQuality(rawDt){
 /* ================================================== リサイズ・画面向き */
 function resize(){
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, Q().pr));
+  renderer.setPixelRatio(Math.max(0.6, Math.min(window.devicePixelRatio||1, Q().pr) * (typeof prScale==='number' ? prScale : 1)));
   renderer.setSize(w, h);
   sizePost();
   camera.aspect = w/h;
@@ -3660,7 +3788,8 @@ toTitle();
 precompile();
 requestAnimationFrame(frame);
 window.JBR = {G, IN, world, P, CLIMATES, Store, compile, CHUNKS, STAGES, speedAt, inIce, renderer, scene, camera, Sound,
-              sun, setQuality, QUALITY, AT, PF, RV, AV, CROW}; // 調整・検証用
+              sun, setQuality, QUALITY, AT, PF, RV, AV, CROW,
+              CUE, fx:{smokeFx, avFx, avWall, snow, glows, puffs, worldGroup, farGroup, skyDome}}; // 調整・検証用
 </script>
 </body>
 </html>
