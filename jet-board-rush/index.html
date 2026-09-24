@@ -141,6 +141,15 @@
   #orient p{letter-spacing:.24em;font-size:14px;color:#a9d4f2;}
 
   #flash{position:fixed;inset:0;z-index:9;pointer-events:none;opacity:0;background:#fff;}
+  /* 雪崩が迫ると左から白く飲まれていく */
+  #aval{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;
+        background:linear-gradient(90deg,rgba(228,240,255,.96) 0%,rgba(214,230,255,.55) 13%,rgba(200,220,255,0) 36%);}
+  /* 大詰めの帯（映画の画面比） */
+  #lb i{position:fixed;left:0;right:0;height:8.5vh;background:#02060c;z-index:7;pointer-events:none;
+        transition:transform .55s cubic-bezier(.2,.8,.2,1);}
+  #lb i:first-child{top:0;transform:translateY(-101%);}
+  #lb i:last-child{bottom:0;transform:translateY(101%);}
+  #lb.on i{transform:none;}
   #vig{position:fixed;inset:0;z-index:8;pointer-events:none;
        background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 52%,rgba(3,10,20,.55) 100%);}
 
@@ -161,6 +170,8 @@
 <body>
 <div id="view"></div>
 <div id="vig"></div>
+<div id="aval"></div>
+<div id="lb"><i></i><i></i></div>
 <div id="flash"></div>
 
 <div id="hud" class="off">
@@ -326,13 +337,19 @@ const CHUNKS = {
   w1_drop: {len:134, terrain:[[18,0],[22,-5],[8,0],['gap',6],[12,0],['gap',6],[12,0],['gap',6],[14,0],[30,0]],
     ents:[
     {t:'low',x:12,w:4,y:1.30},{t:'coins',x:8,y:0.65,n:3,dx:2.6},
+    /* ライバルの顔見せ。奥の車線から追い抜いて、飛び石を先に跳んで見せ、去っていく */
+    {t:'rv',x:14,a:'enter'},{t:'rv',x:60,a:'leave'},
     {t:'block',x:30,h:1.5,w:1.4},{t:'coin',x:30,y:2.7},
     {t:'coin',x:51,y:1.8},{t:'coin',x:69,y:1.8},{t:'coin',x:87,y:1.8},
     {t:'low',x:110,w:4,y:1.30},{t:'coins',x:106,y:0.65,n:3,dx:2.6},
     {t:'block',x:124,h:1.6,w:1.5},{t:'coins',x:130,y:1.6,n:2,dx:2.8}]},
 
-  /* ---- 波2：くぐり連打。伏せ→伏せ→跳ぶ を 14〜24m 刻みで ---- */
+  /* ---- 波2：くぐり連打。伏せ→伏せ→跳ぶ を 14〜24m 刻みで ----
+     後半はカラスが煙玉を落としてくる。煙の中は近づくまで障害物の輪郭しか見えない */
   w2_duck: {len:132, terrain:[[22,-4],[110,0]], ents:[
+    {t:'crow',x:6,a:'enter'},
+    {t:'smoke',x:62,w:24},{t:'smoke',x:90,w:34},
+    {t:'crow',x:112,a:'leave'},
     {t:'low',x:18,w:4,y:1.30},
     {t:'block',x:42,h:1.6,w:1.5},
     {t:'low',x:66,w:4,y:1.30},
@@ -356,16 +373,21 @@ const CHUNKS = {
     {t:'coins',x:100,y:2.0,n:3,dx:2.8,arc:1.2}]},
 
   /* ---- 波4：ジャンプ台。坂を駆け上がって大穴を跳ぶ（この面の見せ場） ---- */
-  w4_launch: {len:161, terrain:[[20,0],[16,4.5],[6,0],['gap',12,-3],[22,-2],[24,0],['gap',9],[16,0],[36,0]],
+  w4_launch: {len:161, terrain:[[20,0],[16,4.5],[6,0],['gap',12,-3],[22,-2],[30,0],['gap',9],[10,0],[36,0]],
     ents:[
     {t:'low',x:14,w:4,y:1.30},{t:'coins',x:6,y:0.65,n:3,dx:2.6},
     {t:'coin',x:44,y:3.4},{t:'coin',x:48,y:4.2},{t:'coin',x:52,y:3.4},   // 飛距離の目印
-    {t:'enemy',x:72,kind:'slider'},
-    {t:'coin',x:72,y:3.0},
-    {t:'low',x:130,w:4,y:1.30},
-    {t:'low',x:144,w:4,y:1.30},{t:'coins',x:134,y:0.65,n:4,dx:2.6},
-    {t:'enemy',x:156,kind:'flyer',y:1.6},
-    {t:'coins',x:116,y:1.8,n:3,dx:2.8}]},
+    /* ライバルとの一騎打ち。前で減速して道をふさぐ（踏めば +500、転げて一度下がる）
+       → 頭上に張りつく（跳ぶと当たる）→ 前から氷の機雷を落とす */
+    {t:'rv',x:30,a:'enter'},
+    {t:'rv',x:56,a:'block',at:82},
+    {t:'coin',x:82,y:3.6},                                               // 踏むか跳び越すかの目印
+    {t:'rv',x:119,a:'hover',to:132},
+    {t:'coins',x:121,y:3.3,n:4,dx:3.3},                                  // 跳びたくなる位置の結晶
+    {t:'rv',x:133,a:'drop'},
+    {t:'mine',x:150},{t:'mine',x:154},
+    {t:'coins',x:136,y:1.6,n:3,dx:3.0},
+    {t:'rv',x:160,a:'leave'}]},
 
   /* ---- 波5：落ち着き。障害物は少なく、代わりに「落ちる道」を用意する ----
      踏み切り坂から跳ぶと空中のレールに乗れる。上は結晶だらけ、下は柱がある。
@@ -382,40 +404,51 @@ const CHUNKS = {
     {t:'coins',x:80,y:4.6,n:4,dx:2.9},{t:'coins',x:96,y:4.6,n:4,dx:2.9},
     {t:'block',x:58,h:1.5,w:1.4},{t:'block',x:88,h:1.5,w:1.4},   // 下の道
     {t:'wear',x:112,y:2.0},
+    {t:'aval',x:120,a:'rumble'},                                         // 山が鳴り始める
     {t:'coins',x:124,y:1.5,n:4,dx:3.4},{t:'coins',x:148,y:1.5,n:4,dx:3.4}]},
 
-  /* ---- 最終区間：稼いだ勢いを維持したまま、密度を最大にする ---- */
+  /* ---- 最終区間：ゲートをくぐった瞬間に雪崩が起きる。止まれば飲まれる ----
+     ライバルも雪崩から逃げてきて、最後の嫌がらせをしたあと雪崩に飲まれる。 */
   storm: {len:178, terrain:[[62,0],['gap',10],[46,0],['gap',9],[51,0]], ents:[
-    {t:'gate',x:2},
+    {t:'gate',x:2},{t:'aval',x:3,a:'go'},
     {t:'low',x:16,w:4,y:1.30},
+    {t:'rv',x:24,a:'enter'},
     {t:'low',x:32,w:4,y:1.30},
     {t:'low',x:48,w:4,y:1.30},
-    {t:'low',x:92,w:4,y:1.30},
-    {t:'low',x:104,w:4,y:1.30},
-    {t:'enemy',x:150,kind:'flyer',y:1.6},
-    {t:'coins',x:20,y:0.65,n:4,dx:2.8},{t:'coins',x:96,y:0.65,n:4,dx:2.8},
+    {t:'rv',x:78,a:'hover',to:104},
+    {t:'coins',x:84,y:3.3,n:5,dx:3.0},
+    {t:'low',x:108,w:4,y:1.30},
+    {t:'rv',x:112,a:'drop'},
+    {t:'mine',x:143},{t:'mine',x:147},                                   // 1回のジャンプで2つ越える
+    {t:'rv',x:154,a:'doom'},
+    {t:'low',x:169,w:4,y:1.30},
+    {t:'coins',x:20,y:0.65,n:4,dx:2.8},{t:'coins',x:111,y:0.65,n:3,dx:2.6},
     {t:'coin',x:65,y:2.2},{t:'coin',x:69,y:2.8},{t:'coin',x:73,y:2.2},
     {t:'coin',x:122,y:2.2},{t:'coin',x:126,y:2.6},
-    {t:'coin',x:162,y:2.2},{t:'coin',x:166,y:2.6}]},
+    {t:'coins',x:165,y:0.65,n:3,dx:2.6}]},
 
-  /* ---- ゴール ---- */
-  goal: {len:64, terrain:[[24,-3],[40,0]], ents:[
-    {t:'coins',x:10,y:1.7,n:5,dx:3.0},{t:'goal',x:40}]}
+  /* ---- 大詰め：踏み切り坂から大峡谷を跳ぶ。雪崩は谷に落ちて止まり、その先がゴール ---- */
+  finale: {len:148, terrain:[[8,0],[16,4.6],[4,0],['gap',24,-10],[30,-3],[66,0]], ents:[
+    {t:'fin',x:0},{t:'aval',x:28,a:'stop'},
+    {t:'coin',x:30,y:2.8},{t:'coin',x:35,y:4.6},{t:'coin',x:40,y:5.2},{t:'coin',x:45,y:4.2},
+    {t:'coins',x:62,y:1.6,n:5,dx:3.0},
+    {t:'goal',x:88}]}
 };
 
 /* ============================================================== ステージ */
 const STAGES = [{
   id:'winter-01', climate:'winter', name:'FROST RIDGE',
   /* 進行度(0..1) → 速度(m/s)。坂はこのカーブに一時的な倍率として乗る */
-  speed:[[0,13.0],[0.12,14.3],[0.30,15.8],[0.50,16.6],[0.68,17.0],[0.80,17.4],[0.87,19.2],[1,20.2]],
-  seq:['teach','w1_drop','w2_duck','w3_ice','w4_launch','w5_rail','storm','goal']
+  speed:[[0,13.0],[0.114,14.3],[0.285,15.8],[0.476,16.6],[0.647,17.0],[0.761,17.4],[0.828,19.2],[0.95,20.2],[1,20.6]],
+  seq:['teach','w1_drop','w2_duck','w3_ice','w4_launch','w5_rail','storm','finale']
 }];
 
 /* ステージ展開：部品を並べて絶対座標のワールドデータにする */
 function compile(stage){
   const W = { id:stage.id, name:stage.name, climate:stage.climate, speed:stage.speed,
               length:0, surfaces:[], hazards:[], items:[], enemies:[], ices:[],
-              hints:[], signs:[], gates:[], goalX:0, endY:0, marks:{} };
+              hints:[], signs:[], gates:[], goalX:0, endY:0, marks:{},
+              rv:[], mines:[], crow:[], smokes:[], aval:[], fins:[] };
   let ox = 0, oy = 0;                       // 部品の開始位置と、その時点の地面の高さ
   for(const name of stage.seq){
     const c = CHUNKS[name];
@@ -481,6 +514,13 @@ function compile(stage){
         case 'sign': W.signs.push({x:x, y:base}); break;
         case 'gate': W.gates.push({x:x, y:base, fired:false}); break;
         case 'goal': W.goalX = x; W.goalY = base; break;
+        /* 演出と嫌がらせの台本：プレイヤーが x を過ぎたら発動する */
+        case 'rv':   W.rv.push({x:x, a:e.a, at:e.at!=null ? ox+e.at : null, to:e.to!=null ? ox+e.to : null, fired:false}); break;
+        case 'mine': W.mines.push({x:x, y:base, state:'wait', t:0}); break;
+        case 'crow': W.crow.push({x:x, a:e.a, fired:false}); break;
+        case 'smoke':W.smokes.push({x0:x, x1:x+(e.w||24), y:base, state:'idle', t:0}); break;
+        case 'aval': W.aval.push({x:x, a:e.a, fired:false}); break;
+        case 'fin':  W.fins.push({x:x, fired:false}); break;
       }
     }
     ox += c.len; oy = cy;
@@ -503,6 +543,8 @@ function compile(stage){
   W.hazards.sort((a,b)=>a.x0-b.x0);
   W.items.sort((a,b)=>a.x-b.x);
   W.enemies.sort((a,b)=>a.x-b.x);
+  for(const k of ['rv','mines','crow','aval','fins']) W[k].sort((a,b)=>a.x-b.x);
+  W.smokes.sort((a,b)=>a.x0-b.x0);
   return W;
 }
 /* 面の高さと傾き（水平面は y1 が y と同じ） */
@@ -628,13 +670,13 @@ scene.add(sun);
 const ATMOS = [
   {p:0.00, zen:0x2c6cb0, hor:0xa6dcf7, low:0xd6ecfb, fog:0xb1dbf2, sunEl:52, sun:0xfff4e2, sunI:1.00,
    hemS:0xc4e6ff, hemG:0x6f93b8, hemI:0.86, far:0xffffff, glow:0.35, stars:0, aurora:0, moon:0},
-  {p:0.42, zen:0x3a6db4, hor:0xc4def0, low:0xdce8f2, fog:0xc0d8ec, sunEl:34, sun:0xffeccc, sunI:0.95,
+  {p:0.40, zen:0x3a6db4, hor:0xc4def0, low:0xdce8f2, fog:0xc0d8ec, sunEl:34, sun:0xffeccc, sunI:0.95,
    hemS:0xc8dcf2, hemG:0x7890b8, hemI:0.80, far:0xfff6f0, glow:0.45, stars:0, aurora:0, moon:0},
-  {p:0.60, zen:0x4b5aa6, hor:0xffc58e, low:0xf4d6c4, fog:0xf2c6a6, sunEl:13, sun:0xffb46a, sunI:1.10,
+  {p:0.571, zen:0x4b5aa6, hor:0xffc58e, low:0xf4d6c4, fog:0xf2c6a6, sunEl:13, sun:0xffb46a, sunI:1.10,
    hemS:0xf6cdb4, hemG:0x7a78b0, hemI:0.72, far:0xffd8c8, glow:0.85, stars:0, aurora:0, moon:0},
-  {p:0.72, zen:0x363882, hor:0xff8a6e, low:0xd88a9a, fog:0xd4909e, sunEl:4,  sun:0xff7a4e, sunI:1.00,
+  {p:0.685, zen:0x363882, hor:0xff8a6e, low:0xd88a9a, fog:0xd4909e, sunEl:4,  sun:0xff7a4e, sunI:1.00,
    hemS:0xe8a8c0, hemG:0x5a5890, hemI:0.78, far:0xd8a0c0, glow:1.00, stars:0.15, aurora:0, moon:0.3},
-  {p:0.78, zen:0x0a1234, hor:0x34407e, low:0x1c2450, fog:0x283466, sunEl:22, sun:0xa8c4ff, sunI:0.62,
+  {p:0.742, zen:0x0a1234, hor:0x34407e, low:0x1c2450, fog:0x283466, sunEl:22, sun:0xa8c4ff, sunI:0.62,
    hemS:0x7a98e0, hemG:0x1e2650, hemI:1.02, far:0x5a6aa8, glow:0.20, stars:1.0, aurora:0.55, moon:1.0},
   {p:1.00, zen:0x081030, hor:0x2c3a78, low:0x182048, fog:0x243060, sunEl:24, sun:0xa8c4ff, sunI:0.62,
    hemS:0x7a98e0, hemG:0x1e2650, hemI:1.02, far:0x5a6aa8, glow:0.20, stars:1.0, aurora:0.75, moon:1.0}
@@ -651,7 +693,7 @@ function sampleAtmos(p){
   for(const k of ['zen','hor','low','fog','sun','hemS','hemG','far'])
     AT[k].copy(_ca.setHex(a[k])).lerp(_cb.setHex(b[k]), t);
   for(const k of ['sunEl','sunI','hemI','glow','stars','aurora','moon']) AT[k] = lerp(a[k], b[k], t);
-  AT.night = clamp((p-0.72)/0.06, 0, 1);
+  AT.night = clamp((p-0.685)/0.057, 0, 1);
 }
 
 /* 空：カメラを包む球に、グラデーション・太陽・星・月・オーロラを描く */
@@ -732,7 +774,7 @@ const _sunView = new THREE.Vector3();
 function applyAtmos(dt, camX, camY){
   const u = skyMat.uniforms;
   u.uZen.value.copy(AT.zen); u.uHor.value.copy(AT.hor); u.uLow.value.copy(AT.low);
-  u.uSunCol.value.copy(AT.sun);
+  u.uSunCol.value.copy(AT.sun).multiplyScalar(1 - AT.night);   /* 夜は太陽を描かない（谷底から覗けてしまう） */
   const el = Math.max(AT.sunEl, 1.5) * Math.PI/180;
   const vEl = AT.night > 0.5 ? -0.2 : Math.min(el, 20*Math.PI/180);   /* 空に描く太陽は低めに見せる */
   _sunView.set(Math.sin(0.42)*Math.cos(vEl), Math.sin(vEl), -Math.cos(0.42)*Math.cos(vEl));
@@ -952,7 +994,13 @@ function renderFrame(){
   pass(compMat, null);
 }
 /* シェーダーを先にまとめてコンパイルしておく（初回プレイのカクつき防止） */
-function precompile(){ try{ renderer.compile(scene, camera); }catch(e){} }
+function precompile(){
+  /* 隠れている演出（ライバル・カラス・雪崩の壁・輪郭など）も最初にまとめてコンパイルしておく */
+  const hidden = typeof warmList==='function' ? warmList().filter(m=>!m.visible) : [];
+  hidden.forEach(m=>m.visible = true);
+  try{ renderer.compile(scene, camera); }catch(e){}
+  hidden.forEach(m=>m.visible = false);
+}
 function setQuality(i, manual){
   qIdx = clamp(i, 0, QUALITY.length-1);
   if(manual) qAuto = false;
@@ -1134,8 +1182,32 @@ function buildStaticWorld(W){
     for(let i=0;i<10;i++)
       gb.box(gx-0.55, gy0+6.2, -4.3+i*0.95, 0.12, 1.0, 0.95, i%2 ? 0x1b2b3f : 0xffffff, {shZ:1.05, top:i%2?0xffffff:0x1b2b3f});
   }
+  /* --- 穴はクレバスにする：奥の氷壁と、縁から下へ落ちていく断崖 --- */
+  const inGap = x => !W.surfaces.some(s=>s.kind==='ground' && x>=s.x0-2 && x<=s.x1+2);
+  const grounds = W.surfaces.filter(s=>s.kind==='ground').sort((a,b)=>a.x0-b.x0);
+  for(let i=0;i<grounds.length-1;i++){
+    const L = grounds[i], R = grounds[i+1];
+    if(R.x0 - L.x1 < 0.5) continue;
+    const xa = L.x1, xb = R.x0, ya = L.y1, yb = R.y, gb = at((xa+xb)/2);
+    const deep = Math.min(ya, yb) - 46;
+    /* 奥の壁（上ほど明るい氷、下は闇に沈む） */
+    const bands = [[0, 3.5, I.side, 0.95], [3.5, 12, G.deep, 0.62], [12, 46, 0x101a2e, 0.5]];
+    for(const [u, v, col, sh] of bands){
+      const ta = ya-u, tb = yb-u, ba = Math.max(deep, ya-v), bb = Math.max(deep, yb-v);
+      gb.quad([xa,ba,-5.5],[xb,bb,-5.5],[xb,tb,-5.5],[xa,ta,-5.5], col, sh);
+    }
+    /* 両側の断崖を下まで伸ばす */
+    gb.quad([xa,ya-6.4,-5.5],[xa,ya-6.4,5.5],[xa,deep,5.5],[xa,deep,-5.5], 0x162238, 0.6);
+    gb.quad([xb,yb-6.4,5.5],[xb,yb-6.4,-5.5],[xb,deep,-5.5],[xb,deep,5.5], 0x1c2a44, 0.7);
+    /* 奥の壁のつらら（大きな穴ほど多い） */
+    for(let x=xa+0.8; x<xb-0.5; x+=1.6+rnd()*1.6){
+      const t = (x-xa)/(xb-xa), y = lerp(ya, yb, t);
+      gb.icicle(x, y-0.2, -5.2, 0.5, 1.2+rnd()*2.4, I.top);
+    }
+  }
   /* --- 背景の木・岩・雪山（ステージ全域にばら撒く） --- */
   for(let x=6; x<W.length+40; x += 5 + rnd()*9){
+    if(inGap(x)) continue;                            /* 穴の上に浮かせない */
     const gb = at(x), by = gyAt(x);
     const back = rnd()<0.72;
     const z = back ? -(8 + rnd()*20) : (9 + rnd()*7);
@@ -1181,6 +1253,7 @@ function buildStaticWorld(W){
   };
   /* 1. 出だしの森：コースの奥に針葉樹を密に並べ、手前の下端にも梢をのぞかせる */
   for(let x=0; x<(M.w2_duck||220); x+=2.6+rnd()*3.2){
+    if(inGap(x)) continue;
     tree(at(x), x, -(6.6 + rnd()*6), 0.9 + rnd()*0.8, gyAt(x));
     if(rnd() < 0.30) tree(at(x), x+1.3, 12 + rnd()*5, 1.1 + rnd()*0.7, gyAt(x) - 10.5);
   }
@@ -1210,6 +1283,7 @@ function buildStaticWorld(W){
   const gateX = W.gates.length ? W.gates[0].x : 0;
   if(gateX){
     for(let x=gateX+6; x<W.goalX+20; x+=11){
+      if(inGap(x)) continue;
       for(const z of [-5.3, 5.9]){
         const by = gyAt(x);
         at(x).cyl(x, by, z, 0.10, 0.08, 2.5, 5, 0x2a3346, {cap:true});
@@ -1291,7 +1365,11 @@ function updateFar(camX, camY){
    服 / 素肌 を別メッシュに分けてあるので、被弾で服だけ消せる。        */
 const SKIN = 0xf0c49a, HAIR = 0x3a2a20, CLOTH = 0xe8503f, CLOTH2 = 0x2f4f7f,
       UNDER = 0xffffff, BOARD = 0x2b3a55, BOARD2 = 0xffd23f, JET = 0x8fa8bd;
-function buildRider(){
+/* pal で色を差し替えられる（ライバルは黒と紫） */
+function buildRider(pal){
+  const C = Object.assign({cloth:CLOTH, clothHi:0xff6a54, scarf:0xff8a6f, cloth2:CLOTH2, cloth2Hi:0x25406b,
+    board:BOARD, board2:BOARD2, beanie:0xffd23f, beanieHi:0xffe37a, lens:0x7fe6ff, lensHi:0x9ff0ff,
+    flame:0x8fe6ff, jet:JET}, pal||{});
   const rig = new THREE.Group();
   const gBoard = new THREE.Group(), gLegs = new THREE.Group(),
         gTorso = new THREE.Group(), gHead = new THREE.Group();
@@ -1299,19 +1377,19 @@ function buildRider(){
 
   /* ボード＋ジェット */
   let gb = new GB();
-  gb.taper(0, 0.10, 0, 2.55, 0.62, 2.15, 0.5, 0.14, BOARD, {top:BOARD2});
+  gb.taper(0, 0.10, 0, 2.55, 0.62, 2.15, 0.5, 0.14, C.board, {top:C.board2});
   gb.box(0.0, 0.05, 0, 2.2, 0.08, 0.5, 0x1a2436, {top:0x1a2436});
   gb.box(-0.42, 0.22, 0, 0.42, 0.12, 0.42, 0x141c2c, {top:0x141c2c});   // ビンディング
   gb.box( 0.46, 0.22, 0, 0.42, 0.12, 0.42, 0x141c2c, {top:0x141c2c});
-  gb.box(-1.02, 0.30, 0, 0.62, 0.34, 0.40, JET, {top:0x9fb6c8});
+  gb.box(-1.02, 0.30, 0, 0.62, 0.34, 0.40, C.jet, {top:0x9fb6c8});
   gb.box(-1.34, 0.30, 0, 0.16, 0.42, 0.46, 0x60748c, {top:0x8fa8bd});
   gb.box(-0.70, 0.24, 0, 0.30, 0.22, 0.34, 0x2b3a55, {top:0x2b3a55});
-  gb.box(-1.02, 0.50, 0, 0.44, 0.10, 0.30, 0xffd23f, {top:0xffe37a});
+  gb.box(-1.02, 0.50, 0, 0.44, 0.10, 0.30, C.board2, {top:C.board2});
   const board = mk(gb); gBoard.add(board);
   /* 噴射炎 */
   const flameGeo = new THREE.ConeGeometry(0.26, 1.5, 8, 1, true);
   flameGeo.rotateZ(Math.PI/2); flameGeo.translate(-0.9, 0, 0);
-  const flameMat = new THREE.MeshBasicMaterial({color:0x8fe6ff, transparent:true, opacity:0.9,
+  const flameMat = new THREE.MeshBasicMaterial({color:C.flame, transparent:true, opacity:0.9,
                      blending:THREE.AdditiveBlending, depthWrite:false, fog:false});
   const flame = new THREE.Mesh(flameGeo, flameMat); flame.position.set(-1.42, 0.30, 0);
   gBoard.add(flame);
@@ -1334,9 +1412,9 @@ function buildRider(){
   gb.box( 0.40, 0.22, 0.02, 0.42, 0.20, 0.40, 0x1a2436, {top:0x1a2436});
   const legsSkin = mk(gb);
   gb = new GB();
-  gb.box(-0.34, 0.58, 0, 0.40, 0.80, 0.44, CLOTH2, {top:CLOTH2});
-  gb.box( 0.40, 0.58, 0, 0.40, 0.80, 0.44, CLOTH2, {top:CLOTH2});
-  gb.box( 0.02, 0.82, 0, 1.00, 0.40, 0.66, CLOTH2, {top:0x25406b});
+  gb.box(-0.34, 0.58, 0, 0.40, 0.80, 0.44, C.cloth2, {top:C.cloth2});
+  gb.box( 0.40, 0.58, 0, 0.40, 0.80, 0.44, C.cloth2, {top:C.cloth2});
+  gb.box( 0.02, 0.82, 0, 1.00, 0.40, 0.66, C.cloth2, {top:C.cloth2Hi});
   const pants = mk(gb);
   gLegs.add(legsSkin, pants);
 
@@ -1347,13 +1425,13 @@ function buildRider(){
   gb.box( 0.16, 0.26,  0.48, 0.28, 0.58, 0.26, SKIN, {top:SKIN});
   const torsoSkin = mk(gb);
   gb = new GB();
-  gb.box(0, 0.24, 0, 0.88, 0.68, 0.64, CLOTH, {top:0xff6a54});
+  gb.box(0, 0.24, 0, 0.88, 0.68, 0.64, C.cloth, {top:C.clothHi});
   gb.box(0, 0.00, 0, 0.92, 0.16, 0.66, 0x1a2436, {top:0x1a2436});
   gb.box(0, 0.54, 0, 0.66, 0.12, 0.56, 0x1a2436, {top:0x2b3a55});     // 襟
-  gb.box(-0.10, 0.28, -0.48, 0.36, 0.62, 0.32, CLOTH, {top:0xff6a54});
-  gb.box( 0.16, 0.28,  0.50, 0.36, 0.62, 0.32, CLOTH, {top:0xff6a54});
-  gb.box(-0.44, 0.44, 0, 0.44, 0.13, 0.26, CLOTH, {top:0xff8a6f});    // なびくマフラー
-  gb.box(-0.76, 0.36, 0, 0.30, 0.11, 0.22, CLOTH, {top:0xff8a6f});
+  gb.box(-0.10, 0.28, -0.48, 0.36, 0.62, 0.32, C.cloth, {top:C.clothHi});
+  gb.box( 0.16, 0.28,  0.50, 0.36, 0.62, 0.32, C.cloth, {top:C.clothHi});
+  gb.box(-0.44, 0.44, 0, 0.44, 0.13, 0.26, C.cloth, {top:C.scarf});    // なびくマフラー
+  gb.box(-0.76, 0.36, 0, 0.30, 0.11, 0.22, C.cloth, {top:C.scarf});
   const jacket = mk(gb);
   gTorso.add(torsoSkin, jacket);
 
@@ -1363,12 +1441,12 @@ function buildRider(){
   gb.box(-0.03, 0.30, 0, 0.52, 0.14, 0.50, HAIR, {top:HAIR});
   const headSkin = mk(gb);
   gb = new GB();
-  gb.box(0, 0.31, 0, 0.58, 0.26, 0.56, 0xffd23f, {top:0xffe37a});
+  gb.box(0, 0.31, 0, 0.58, 0.26, 0.56, C.beanie, {top:C.beanieHi});
   gb.box(-0.04, 0.45, 0, 0.20, 0.14, 0.20, UNDER, {top:UNDER});
   const beanie = mk(gb);
   gb = new GB();
   gb.box(0.09, 0.14, 0, 0.38, 0.17, 0.50, 0x101820, {top:0x101820});
-  gb.box(0.25, 0.14, 0, 0.10, 0.14, 0.40, 0x7fe6ff, {top:0x9ff0ff});
+  gb.box(0.25, 0.14, 0, 0.10, 0.14, 0.40, C.lens, {top:C.lensHi});
   const goggles = mk(gb);
   gHead.add(headSkin, beanie, goggles);
 
@@ -1529,7 +1607,7 @@ const glows = new FXPool(360, true, 0.05);     // 噴射・勢いの尾・火花
 const _pc = new THREE.Color(), _gc = new THREE.Color();
 const COL = { snow:new THREE.Color(0xffffff), jet:new THREE.Color(0x8fe6ff), hot:new THREE.Color(0xffb04a),
               gold:new THREE.Color(0xffd36a), ice:new THREE.Color(0x9ff0ff), white:new THREE.Color(0xffffff),
-              warm:new THREE.Color(0xff8a6f) };
+              warm:new THREE.Color(0xff8a6f), violet:new THREE.Color(0xb07aff), rival:new THREE.Color(0xff4a8a) };
 /* 雪の色は環境光になじませる（夕方は桃色、夜は青） */
 function snowCol(){ return _pc.copy(COL.snow).lerp(AT.hemS, 0.35); }
 
@@ -1825,6 +1903,13 @@ const Sound = {
     const wn = c.createBuffer(1, len, c.sampleRate), e = wn.getChannelData(0);
     for(let i=0;i<len;i++) e[i] = Math.random()*2-1;
     this.white = wn;
+    /* 山鳴り（雪崩）：低域のノイズと超低音 */
+    const rs = c.createBufferSource(); rs.buffer = bn; rs.loop = true;
+    const rf = c.createBiquadFilter(); rf.type='lowpass'; rf.frequency.value = 150;
+    this.rumbleG = c.createGain(); this.rumbleG.gain.value = 0;
+    rs.connect(rf).connect(this.rumbleG).connect(this.master); rs.start();
+    const ro = c.createOscillator(); ro.type='sine'; ro.frequency.value = 37;
+    const rog = c.createGain(); rog.gain.value = 0.35; ro.connect(rog).connect(this.rumbleG); ro.start();
     /* 風：速度で音量と帯域が変わる。高速ほど「ヒュー」と鳴る */
     const ns = c.createBufferSource(); ns.buffer = wn; ns.loop = true;
     const bp = c.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=600; bp.Q.value=0.8;
@@ -1919,6 +2004,51 @@ const Sound = {
     [330,440,554,660].forEach((f,i)=> this.tone(f, 0.6, 'sawtooth', 0.12, f*1.5, t+i*0.04)); },
   crash(t){ this.noiseHit(t, 1.6, 0.28, 'highpass', 5200, 3800, this.sfxG, true); },
 
+  /* ---- 演出と嫌がらせ ---- */
+  caw(){ if(!this.ready||!this.on) return; const t=this.now();
+    for(let i=0;i<2;i++){ const tt=t+i*0.17;
+      this.tone(760, 0.13, 'sawtooth', 0.09, 400, tt);
+      this.noiseHit(tt, 0.11, 0.14, 'bandpass', 1500, 700, null, true); } },
+  bombDrop(){ if(!this.ready||!this.on) return; this.tone(2000, 0.42, 'sine', 0.09, 520); },
+  smoke(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(72, 0.5, 'sine', 0.5, 34, t);
+    this.noiseHit(t, 1.1, 0.34, 'lowpass', 1800, 180);
+    this.noiseHit(t, 0.8, 0.10, 'highpass', 3000, 1200, null, true); },
+  rival(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.noiseHit(t, 0.45, 0.24, 'bandpass', 400, 3200, null, true);
+    this.tone(180, 0.4, 'sawtooth', 0.09, 420, t);
+    [988, 784, 988].forEach((f,i)=> this.tone(f, 0.07, 'square', 0.05, null, t+0.2+i*0.08)); },   // 挑発の3音
+  warn(){ if(!this.ready||!this.on) return; const t=this.now();
+    for(let i=0;i<3;i++) this.tone(1480, 0.06, 'square', 0.07, null, t+i*0.11); },
+  stomp(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(220, 0.12, 'square', 0.22, 110, t); this.tone(660, 0.16, 'square', 0.12, 1760, t+0.05);
+    this.noiseHit(t, 0.12, 0.3, 'lowpass', 1600, 300); },
+  mine(){ if(!this.ready||!this.on) return; this.tone(1300, 0.3, 'sine', 0.08, 320); },
+  clank(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(540, 0.09, 'square', 0.12, 380, t); this.noiseHit(t, 0.12, 0.2, 'highpass', 4000, 2500, null, true); },
+  crack(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.noiseHit(t, 0.25, 0.3, 'highpass', 2000, 600, null, true); this.tone(48, 1.4, 'sine', 0.35, 30, t); },
+  avalanche(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(42, 2.2, 'sine', 0.7, 28, t); this.noiseHit(t, 2.4, 0.55, 'lowpass', 900, 90);
+    this.crash(t); this.noiseHit(t+0.05, 0.4, 0.4, 'bandpass', 300, 2400, null, true); },
+  avalancheFall(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.noiseHit(t, 2.0, 0.5, 'lowpass', 1200, 60); this.tone(60, 1.8, 'sine', 0.5, 25, t+0.2); },
+  finale(){ if(!this.ready||!this.on) return; this.noiseHit(this.now(), 1.2, 0.2, 'highpass', 600, 6000, null, true); },
+  /* 踏み切りで曲を抜き、着地で全部戻す */
+  drop(){ if(!this.ready) return; const t=this.now();
+    this.musicG.gain.cancelScheduledValues(t); this.musicG.gain.setTargetAtTime(0.03, t, 0.05);
+    if(this.on) this.noiseHit(t, 1.0, 0.3, 'bandpass', 500, 4000, null, true); },
+  impact(){ if(!this.ready) return; const t=this.now();
+    this.musicG.gain.cancelScheduledValues(t); this.musicG.gain.setTargetAtTime(0.40, t, 0.02);
+    if(!this.on) return;
+    this.kick(t, 1.4); this.crash(t); this.tone(55, 1.2, 'sine', 0.6, 35, t);
+    [57,64,69,72,76].forEach((m,i)=> this.tone(mtof(m), 1.4, 'sawtooth', 0.06, null, t+i*0.012)); },
+  firework(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.noiseHit(t, 0.08, 0.22, 'lowpass', 2500, 400);
+    for(let i=0;i<5;i++) this.noiseHit(t+0.1+Math.random()*0.35, 0.03, 0.07, 'highpass', 6000, null, null, true); },
+  rumble(level){ if(!this.ready) return;
+    this.rumbleG.gain.setTargetAtTime(this.on ? level*0.6 : 0, this.ctx.currentTime, 0.15); },
+
   /* 風・ジェット・勢いの唸りを速度に追従させる */
   speed(v, brake, boost){
     if(!this.ready) return;
@@ -1935,11 +2065,12 @@ const Sound = {
   },
   quiet(){ if(!this.ready) return; const t=this.ctx.currentTime;
     this.windG.gain.setTargetAtTime(0, t, 0.05); this.jetG.gain.setTargetAtTime(0, t, 0.05);
-    this.boostG.gain.setTargetAtTime(0, t, 0.05); },
+    this.boostG.gain.setTargetAtTime(0, t, 0.05); this.rumbleG.gain.setTargetAtTime(0, t, 0.05); },
 
   /* ---------------- 曲 ---------------- */
   startBGM(){ this.bgmOn=true; this.step=0; this.section='main'; this.tempo=128;
-              if(this.ctx){ this.nextNote=this.ctx.currentTime+0.06; this.padBus.gain.setValueAtTime(0.0, this.ctx.currentTime); } },
+              if(this.ctx){ const t=this.ctx.currentTime; this.nextNote=t+0.06; this.padBus.gain.setValueAtTime(0.0, t);
+                            this.musicG.gain.cancelScheduledValues(t); this.musicG.gain.setValueAtTime(0.34, t); } },
   stopBGM(){ this.bgmOn=false; if(this.ready) this.padBus.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3); },
   setSection(sec){
     if(sec===this.section) return;
@@ -2035,7 +2166,7 @@ const Store = {
 };
 /* ゴースト：一番速くクリアした走りを 20Hz で記録して、半透明で並走させる */
 const GhostStore = {
-  key:'jetboardrush.ghost.v1',
+  key:'jetboardrush.ghost.v2',
   load(){ try{ return JSON.parse(localStorage.getItem(this.key)||'null'); }catch(e){ return null; } },
   save(g){ try{ localStorage.setItem(this.key, JSON.stringify(g)); }catch(e){} }
 };
@@ -2051,19 +2182,20 @@ function recordGhost(){
 function makeRecord(g, sc, cleared){
   return { v:1, game:'jet-board-rush', stage:g.world.id, climate:g.world.climate,
            cleared:cleared, score:sc.total, timeMs:Math.round(g.timeMs),
-           coins:g.coins, near:g.near, tricks:g.tricks, distance:Math.round(g.dist), damage:g.dmg,
+           coins:g.coins, near:g.near, tricks:g.tricks, stomps:g.stomps||0, distance:Math.round(g.dist), damage:g.dmg,
            at:new Date().toISOString() };
 }
 function computeScore(g, cleared){
   const coinPts = g.coins*120;
   const nearPts = g.near*P.nearPts;
   const trickPts = g.tricks*150;
+  const stompPts = (g.stomps||0)*500;
   const distPts = Math.floor(g.dist)*3;
   const clearB  = cleared ? 3000 : 0;
   const timeB   = cleared ? Math.max(0, Math.round((115 - g.timeMs/1000)*80)) : 0;
   const dmgB    = cleared ? (g.dmg===0 ? 2500 : (g.dmg===1 ? 900 : 0)) : 0;
-  return {coinPts, nearPts, trickPts, distPts, clearB, timeB, dmgB,
-          total:coinPts+nearPts+trickPts+distPts+clearB+timeB+dmgB};
+  return {coinPts, nearPts, trickPts, stompPts, distPts, clearB, timeB, dmgB,
+          total:coinPts+nearPts+trickPts+stompPts+distPts+clearB+timeB+dmgB};
 }
 const fmtTime = ms => (ms/1000).toFixed(2)+'s';
 
@@ -2088,7 +2220,8 @@ const G = {
   groundSlope:0, camDip:0, near:0, popT:0, lastY:0, airT:0, rampT:0, rampM:0,
   boost:0, chain:0, chainT:0, gateT:0, rush:false,
   hitStop:0, slowT:0, slowK:1, flip:-1, flipDur:1, tricks:0, landImpact:0,
-  coinChain:0, coinT:0, camAir:0, camRoll:0, introT:0, splitT:0
+  coinChain:0, coinT:0, camAir:0, camRoll:0, introT:0, splitT:0,
+  stomps:0, finale:0, finCam:0, fwT:0
 };
 
 const el = id => document.getElementById(id);
@@ -2099,7 +2232,8 @@ const UI = {
   pop:el('pop'), split:el('split'), go:el('go'), rank:el('rank'), delta:el('delta'), barGhost:el('barGhost'),
   flash:el('flash'), rtitle:el('resultTitle'), rsub:el('resultSub'), sheet:el('sheet'),
   total:el('totalNum'), newbest:el('newbest'), titleBest:el('titleBest'), resultBest:el('resultBest'),
-  keyrow:el('keyrow'), startPrompt:el('startPrompt'), retryPrompt:el('retryPrompt')
+  keyrow:el('keyrow'), startPrompt:el('startPrompt'), retryPrompt:el('retryPrompt'),
+  aval:el('aval'), lb:el('lb')
 };
 const isTouch = matchMedia('(hover:none)').matches || 'ontouchstart' in window;
 (function fillKeys(){
@@ -2146,6 +2280,7 @@ function resetRun(state){
   for(const it of world.items){ it.got=false; if(it.mesh) it.mesh.visible=true; }
   for(const e of world.enemies){ e.x=e.home; e.alive=true; e.ph=Math.random()*6.28;
     if(e.mesh){ scene.remove(e.mesh); e.mesh=null; } }
+  resetSetPieces();
   for(const h of world.hints) h.fired = Store.cleared();     // 一度クリアしたら出さない
   for(const c of rider.userData.clothes) c.visible = true;
   rider.visible = true; rider.rotation.set(0,0,0);
@@ -2268,6 +2403,7 @@ function showResult(cleared){
   rows.push(['❄ CRYSTAL', G.coins+' × 120 = '+sc.coinPts.toLocaleString()]);
   if(G.near) rows.push(['NEAR MISS', G.near+' × '+P.nearPts+' = '+sc.nearPts.toLocaleString()]);
   if(G.tricks) rows.push(['FLIP', G.tricks+' × 150 = '+sc.trickPts.toLocaleString()]);
+  if(G.stomps) rows.push(['STOMP', G.stomps+' × 500 = '+sc.stompPts.toLocaleString()]);
   rows.push(['DISTANCE', Math.round(G.dist)+' m = '+sc.distPts.toLocaleString()]);
   if(cleared){
     rows.push(['GOAL', '+'+sc.clearB.toLocaleString()]);
@@ -2307,6 +2443,713 @@ function showResult(cleared){
   })(performance.now());
 }
 
+/* ====================================================== 演出と嫌がらせ
+   カラスの煙幕・ライバル・氷の機雷・雪崩・大詰めの大ジャンプ。
+   どれもコースの台本（crow / smoke / rv / mine / aval / fin）で発動する。 */
+
+/* ---- 大きな煙の玉。点スプライトでは大きさに上限があるので、板ポリを instancing で並べる ---- */
+const BPVS = `
+  attribute vec3 aOff; attribute float aSize; attribute float aAlpha; attribute vec3 aColor; attribute float aRot;
+  uniform vec3 uHole; uniform float uHoleOn;
+  varying vec2 vUv; varying float vAlpha; varying vec3 vColor; varying vec2 vWP;
+  void main(){
+    vec4 mv = modelViewMatrix * vec4(aOff, 1.0);
+    float c = cos(aRot), s = sin(aRot);
+    vec2 q = vec2(c*position.x - s*position.y, s*position.x + c*position.y) * aSize;
+    mv.xy += q;
+    vUv = position.xy + 0.5;
+    vWP = aOff.xy + q;                 // カメラはほぼ正面を向くので、視点の xy ≒ 世界の xy
+    vAlpha = aAlpha; vColor = aColor;
+    gl_Position = projectionMatrix * mv;
+  }`;
+const BPFS = `
+  uniform sampler2D uMap; uniform vec3 uHole; uniform float uHoleOn;
+  varying vec2 vUv; varying float vAlpha; varying vec3 vColor; varying vec2 vWP;
+  void main(){
+    vec4 t = texture2D(uMap, vUv);
+    /* 自機のまわりだけ煙が吹き払われる（すぐ目の前だけは見える） */
+    float hole = mix(1.0, smoothstep(uHole.z*0.45, uHole.z, length((vWP - uHole.xy)*vec2(0.72, 1.0))), uHoleOn);
+    float a = t.a * vAlpha * hole;
+    if(a < 0.004) discard;
+    gl_FragColor = vec4(vColor * (0.72 + 0.28*t.r), a);
+  }`;
+/* もこもこした雲の形（上が明るく下が暗い） */
+const CLOUD_TEX = (function(){
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d'), rnd = mulberry(0xc10d);
+  for(let i=0;i<14;i++){
+    const a = rnd()*Math.PI*2, r = rnd()*30, cx = 64+Math.cos(a)*r, cy = 64+Math.sin(a)*r*0.8, rr = 22+rnd()*20;
+    const sh = Math.round(170 + 85*clamp(1 - (cy-30)/80, 0, 1));
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, rr);
+    g.addColorStop(0, `rgba(${sh},${sh},${sh},0.55)`); g.addColorStop(1, `rgba(${sh},${sh},${sh},0)`);
+    x.fillStyle = g; x.beginPath(); x.arc(cx, cy, rr, 0, Math.PI*2); x.fill();
+  }
+  const t = new THREE.CanvasTexture(cv); return t;
+})();
+function BigPuffs(n, hole){
+  const base = new THREE.PlaneGeometry(1, 1);
+  const g = new THREE.InstancedBufferGeometry();
+  g.index = base.index; g.setAttribute('position', base.attributes.position);
+  g.instanceCount = n;
+  this.n = n; this.i = 0;
+  this.off = new Float32Array(n*3); this.sz = new Float32Array(n); this.al = new Float32Array(n);
+  this.col = new Float32Array(n*3); this.rot = new Float32Array(n);
+  this.v = new Float32Array(n*3); this.life = new Float32Array(n); this.max = new Float32Array(n);
+  this.s0 = new Float32Array(n); this.s1 = new Float32Array(n); this.a0 = new Float32Array(n);
+  this.grav = new Float32Array(n); this.spin = new Float32Array(n); this.grp = new Int16Array(n).fill(-1);
+  this.age = new Float32Array(n);
+  const ia = (arr, k) => new THREE.InstancedBufferAttribute(arr, k).setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute('aOff', ia(this.off, 3)); g.setAttribute('aSize', ia(this.sz, 1));
+  g.setAttribute('aAlpha', ia(this.al, 1)); g.setAttribute('aColor', ia(this.col, 3));
+  g.setAttribute('aRot', ia(this.rot, 1));
+  this.uni = { uMap:{value:CLOUD_TEX}, uHole:{value:new THREE.Vector3(0,0,4)}, uHoleOn:{value: hole ? 1 : 0} };
+  this.mat = new THREE.ShaderMaterial({ uniforms:this.uni, vertexShader:BPVS, fragmentShader:BPFS,
+    transparent:true, depthWrite:false });
+  this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; scene.add(this.mesh);
+  this.geo = g;
+}
+/* o: {life, s0, s1, a, g, spin, col, grp(煙の区画), delay} */
+BigPuffs.prototype.emit = function(x,y,z, vx,vy,vz, o){
+  const i = this.i = (this.i+1) % this.n;
+  this.off[i*3]=x; this.off[i*3+1]=y; this.off[i*3+2]=z;
+  this.v[i*3]=vx; this.v[i*3+1]=vy; this.v[i*3+2]=vz;
+  this.life[i] = this.max[i] = o.life; this.s0[i] = o.s0; this.s1[i] = o.s1; this.a0[i] = o.a;
+  this.grav[i] = o.g||0; this.spin[i] = o.spin||0; this.rot[i] = Math.random()*6.28;
+  this.grp[i] = o.grp==null ? -1 : o.grp; this.age[i] = -(o.delay||0);
+  const c = o.col; this.col[i*3]=c.r; this.col[i*3+1]=c.g; this.col[i*3+2]=c.b;
+};
+BigPuffs.prototype.clear = function(){ this.life.fill(0); this.al.fill(0); this.sz.fill(0); };
+BigPuffs.prototype.update = function(dt, groupK){
+  for(let i=0;i<this.n;i++){
+    if(this.life[i] <= 0){ if(this.al[i]!==0){ this.al[i]=0; this.sz[i]=0; } continue; }
+    this.age[i] += dt;
+    if(this.age[i] < 0){ this.al[i] = 0; continue; }
+    const gi = this.grp[i];
+    this.v[i*3+1] -= this.grav[i]*dt;
+    this.off[i*3]+=this.v[i*3]*dt; this.off[i*3+1]+=this.v[i*3+1]*dt; this.off[i*3+2]+=this.v[i*3+2]*dt;
+    this.rot[i] += this.spin[i]*dt;
+    if(gi >= 0){
+      /* 煙幕：区画が消えるまで漂い続ける。広がりながら現れる */
+      const k = groupK(gi);
+      if(k <= 0){ this.life[i] = 0; continue; }
+      const g = clamp(this.age[i]/0.35, 0, 1);
+      this.sz[i] = this.s1[i]*(0.3 + 0.7*(1-(1-g)*(1-g))) * (1 + 0.05*Math.sin(G.t*1.7 + i));
+      this.al[i] = this.a0[i] * clamp(this.age[i]/0.12, 0, 1) * k;
+      this.v[i*3] *= Math.exp(-2.5*dt); this.v[i*3+1] *= Math.exp(-2.5*dt);
+    }else{
+      this.life[i] -= dt;
+      const t = 1 - Math.max(0, this.life[i]) / this.max[i];
+      this.sz[i] = this.s0[i] + (this.s1[i]-this.s0[i])*t;
+      this.al[i] = this.a0[i] * (t < 0.12 ? t/0.12 : 1) * (1 - t*t);
+    }
+  }
+  const a = this.geo.attributes;
+  a.aOff.needsUpdate = a.aSize.needsUpdate = a.aAlpha.needsUpdate = a.aColor.needsUpdate = a.aRot.needsUpdate = true;
+};
+const smokeFx = new BigPuffs(IS_MOBILE ? 150 : 220, true);
+const avFx = new BigPuffs(IS_MOBILE ? 150 : 230, false);
+smokeFx.mesh.renderOrder = 2; avFx.mesh.renderOrder = 3;
+
+/* 地面の高さ（穴の上なら手前の縁の高さ）。演出の配置に使う */
+function floorY(x){
+  let y = terrainY(x);
+  if(y !== null) return y;
+  let best = null, bd = Infinity;
+  for(const s of world.surfaces){
+    if(s.kind!=='ground') continue;
+    const d = x < s.x0 ? s.x0-x : x-s.x1;
+    if(d < bd){ bd = d; best = x < s.x0 ? s.y : s.y1; }
+  }
+  return best===null ? 0 : best;
+}
+
+/* ================================================= カラスと煙幕
+   前方の上空に居座り、煙玉を落とす。煙の中は輪郭しか見えず、
+   しかも輪郭は近づくまで浮かばない。反射で抜けるしかない。 */
+function crowGeo(){
+  const b = new GB(), w = new GB(), e = new GB();
+  b.taper(0, -0.40, 0, 1.00, 0.70, 0.55, 0.45, 0.85, 0x1c1826, {top:0x2c2640});
+  b.box(0.55, 0.22, 0, 0.55, 0.50, 0.50, 0x1c1826, {top:0x2c2640});        // 頭
+  b.spike(0.95, 0.12, 0, 0.18, 0.46, 0xffb03c);                           // くちばし
+  b.box(-0.72, -0.20, 0, 0.60, 0.14, 0.50, 0x14101c, {top:0x241e32});     // 尾
+  b.taper(0.05, -0.95, 0, 0.55, 0.55, 0.50, 0.50, 0.45, 0x5a2a8a, {top:0x7a44b0}); // 煙玉の袋
+  w.box(-0.10, 0, 0, 0.80, 0.10, 1.40, 0x241e32, {top:0x3a3252});
+  w.box(-0.30, -0.02, 0.55, 0.60, 0.08, 0.60, 0x14101c, {top:0x2c2640});
+  e.box(0.78, 0.30,  0.26, 0.14, 0.12, 0.05, 0xff3060, {top:0xff3060});
+  e.box(0.78, 0.30, -0.26, 0.14, 0.12, 0.05, 0xff3060, {top:0xff3060});
+  const rig = new THREE.Group();
+  for(const g of [b, w, e]) for(let i=0;i<g.p.length;i+=3) g.p[i] = -g.p[i];    // くちばしを -x（自機の方）へ
+  for(const g of [b, w, e]){ for(let i=0;i<g.p.length;i+=9){                    // 裏返った面の向きを戻す
+    for(let k=0;k<3;k++){ const t=g.p[i+3+k]; g.p[i+3+k]=g.p[i+6+k]; g.p[i+6+k]=t; }
+    for(let k=0;k<3;k++){ const t=g.n[i+3+k]; g.n[i+3+k]=g.n[i+6+k]; g.n[i+6+k]=t; }
+    for(let k=0;k<3;k++){ const t=g.c[i+3+k]; g.c[i+3+k]=g.c[i+6+k]; g.c[i+6+k]=t; } } }
+  for(const g of [b, w, e]) for(let i=0;i<g.n.length;i+=3) g.n[i] = -g.n[i];
+  const body = new THREE.Mesh(b.geo(), propMat); body.castShadow = true;
+  const eyes = new THREE.Mesh(e.geo(), glowMat);
+  const wg = w.geo();
+  const wl = new THREE.Mesh(wg, propMat), wr = new THREE.Mesh(wg, propMat);
+  const pl = new THREE.Group(), pr = new THREE.Group();
+  wl.position.z = 0.7; wr.position.z = -0.7; wr.scale.z = -1;
+  pl.add(wl); pr.add(wr); pl.position.set(0, 0.25, 0.2); pr.position.set(0, 0.25, -0.2);
+  rig.add(body, eyes, pl, pr);
+  rig.userData = {pl, pr};
+  rig.scale.setScalar(1.25);
+  return rig;
+}
+const crowRig = crowGeo(); crowRig.visible = false; scene.add(crowRig);
+function bombGeo(){
+  const gb = new GB();
+  gb.taper(0, -0.45, 0, 0.7, 0.7, 0.9, 0.9, 0.45, 0x3a2456, {top:0x5a3a80, noBottom:false});
+  gb.taper(0, 0.0, 0, 0.9, 0.9, 0.6, 0.6, 0.42, 0x5a3a80, {top:0x7a54a8});
+  gb.box(0, 0.5, 0, 0.18, 0.2, 0.18, 0x222222, {top:0x333333});
+  return gb.geo();
+}
+const bombMesh = new THREE.Mesh(bombGeo(), propMat); bombMesh.visible = false; scene.add(bombMesh);
+const CROW = { on:false, mode:'off', x:0, y:0, t:0, bomb:null, flap:0 };
+const SMOKE_COL = new THREE.Color(0x2e2840), SMOKE_HI = new THREE.Color(0x76688e);
+const _smc = new THREE.Color();
+/* 煙の中の障害物は輪郭だけ光らせる（近づくまで出ない） */
+const SIL_TEX = (function(){
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const x = cv.getContext('2d');
+  x.fillStyle = 'rgba(255,255,255,0.10)'; x.fillRect(8,8,112,112);
+  x.strokeStyle = '#fff'; x.lineWidth = 9; x.strokeRect(9,9,110,110);
+  return new THREE.CanvasTexture(cv);
+})();
+const silMatJump = new THREE.MeshBasicMaterial({map:SIL_TEX, color:0xff7a3c, transparent:true, opacity:0,
+  blending:THREE.AdditiveBlending, depthTest:false, depthWrite:false, fog:false});
+const silMatDuck = silMatJump.clone(); silMatDuck.color.setHex(0x5fe0ff);
+const SIL_GEO = new THREE.PlaneGeometry(1, 1);
+const sils = [];      // {m, hz, zone}
+function smokeK(i){
+  const z = world.smokes[i]; if(!z) return 0;
+  return z.state==='on' ? 1 : (z.state==='fade' ? Math.max(0, 1 - z.t/0.8) : 0);
+}
+function burstSmoke(zi){
+  const z = world.smokes[zi];
+  z.state = 'on'; z.t = 0;
+  const cx = z.x0 + 3, n = Math.round((z.x1 - z.x0 + 4)/1.15), layers = IS_MOBILE ? 2 : 3;
+  for(let k=0;k<n;k++){
+    const x = z.x0 - 2 + (k + Math.random()*0.6)*(z.x1 - z.x0 + 4)/n;
+    const gy = floorY(x);
+    for(let j=0;j<layers;j++){
+      const hy = Math.random(), y = gy - 0.6 + hy*6.4, zz = 1.0 + Math.random()*6.5;
+      const s = 5.0 + Math.random()*3.2;
+      /* 下ほど濃く暗い墨色、上は明るい紫。奥行きが出る */
+      _smc.copy(SMOKE_COL).lerp(SMOKE_HI, hy*0.8 + Math.random()*0.2).lerp(AT.fog, 0.22).multiplyScalar(0.85 + 0.25*AT.hemI);
+      smokeFx.emit(x, y, zz, (x-cx)*0.25, (Math.random()-0.3)*1.2, 0,
+        {life:99, s0:s, s1:s, a:0.9 + Math.random()*0.1, spin:(Math.random()-0.5)*0.4,
+         col:_smc, grp:zi, delay:Math.abs(x - cx)/42});
+    }
+  }
+  /* 区画の中にある障害物に輪郭を用意する */
+  for(const hz of world.hazards){
+    if(hz.cx < z.x0 - 1 || hz.cx > z.x1 + 1) continue;
+    const m = new THREE.Mesh(SIL_GEO, hz.type==='low' ? silMatDuck.clone() : silMatJump.clone());
+    m.renderOrder = 20;
+    if(hz.type==='low'){ m.position.set(hz.cx, hz.y0 + 0.55, 0); m.scale.set(hz.w + 0.4, 1.1, 1); }
+    else { m.position.set(hz.cx, hz.base + hz.h*0.5, 0); m.scale.set(hz.w + 0.5, hz.h + 0.2, 1); }
+    scene.add(m); sils.push({m, hz, zi});
+  }
+  emitSmokePuffBurst(cx, floorY(cx) + 2);
+  Sound.smoke(); G.shake = Math.max(G.shake, 0.22); buzz(18);
+}
+function emitSmokePuffBurst(x, y){
+  for(let k=0;k<14;k++){
+    const a = Math.random()*Math.PI*2, sp = 4 + Math.random()*6;
+    glows.emit(x, y, 2, Math.cos(a)*sp, Math.sin(a)*sp, 0, {life:0.35+Math.random()*0.3, s0:0.7, s1:0.1, a:0.9, g:3, drag:2, col:COL.violet});
+  }
+}
+function updateCrow(dt){
+  for(const tr of world.crow){
+    if(tr.fired || G.px < tr.x) continue;
+    tr.fired = true;
+    if(tr.a==='enter'){ CROW.on = true; CROW.mode = 'in'; CROW.t = 0; CROW.x = G.px + 40; CROW.y = floorY(G.px+40) + 13; Sound.caw(); }
+    else if(tr.a==='leave' && CROW.on){ CROW.mode = 'out'; CROW.t = 0; Sound.caw(); }
+  }
+  /* 煙玉を落とす：区画の手前 30m で投下、0.42 秒で着弾 */
+  world.smokes.forEach((z, zi)=>{
+    if(z.state==='idle' && CROW.on && CROW.mode!=='out' && z.x0 - G.px < 30 && G.state==='PLAY'){
+      z.state = 'fall'; z.t = 0;
+      CROW.bomb = {zi, x0:CROW.x, y0:CROW.y - 1.2, x1:z.x0 + 3, y1:floorY(z.x0+3) + 2.2, t:0};
+      bombMesh.visible = true; Sound.bombDrop(); CROW.throwT = 0.3;
+    }
+    if(z.state==='on' && G.px > z.x1 + 5){ z.state = 'fade'; z.t = 0; }
+    if(z.state==='fade'){ z.t += dt; if(z.t > 0.8) z.state = 'done'; }
+  });
+  const B = CROW.bomb;
+  if(B){
+    B.t += dt/0.42;
+    const t = Math.min(1, B.t);
+    bombMesh.position.set(lerp(B.x0, B.x1, t), lerp(B.y0, B.y1, t) + Math.sin(t*Math.PI)*2.2, 0.6);
+    bombMesh.rotation.z += dt*9;
+    if(Math.random() < 0.8) glows.emit(bombMesh.position.x, bombMesh.position.y + 0.5, 0.6, 0, 1, 0,
+      {life:0.25, s0:0.35, s1:0.05, a:1, g:-2, col:COL.hot});
+    if(B.t >= 1){ bombMesh.visible = false; CROW.bomb = null; burstSmoke(B.zi); }
+  }
+  /* 輪郭：近いほど濃く、脈打つ */
+  for(let i=sils.length-1;i>=0;i--){
+    const s = sils[i], k = smokeK(s.zi);
+    if(k <= 0){ scene.remove(s.m); s.m.material.dispose(); sils.splice(i,1); continue; }
+    const d = s.hz.x0 - G.px;
+    const near = clamp((13 - d)/5.5, 0, 1) * (d < -1 ? clamp(1 + (d+1)/3, 0, 1) : 1);
+    s.m.material.opacity = k * near * (0.55 + 0.25*Math.sin(G.t*16));
+  }
+  smokeFx.uni.uHole.value.set(G.px + 1.2, G.py + 1.0, 3.4);
+  /* カラス本体 */
+  if(!CROW.on){ crowRig.visible = false; return; }
+  CROW.t += dt;
+  let tx, ty;
+  if(CROW.mode==='in'){ tx = G.px + 17; ty = floorY(G.px+17) + 7.8; if(CROW.t > 1.2) CROW.mode = 'hover'; }
+  else if(CROW.mode==='hover'){ tx = G.px + 17 + Math.sin(CROW.t*1.4)*2; ty = floorY(G.px+17) + 7.8 + Math.sin(CROW.t*2.3)*0.7; }
+  else { tx = G.px + 40; ty = floorY(G.px) + 18; if(CROW.t > 1.8){ CROW.on = false; } }
+  CROW.x += (tx - CROW.x)*Math.min(1, dt*2.2) + G.speed*dt*0.0;
+  if(CROW.mode!=='out') CROW.x = Math.max(CROW.x, G.px + 8);
+  CROW.y += (ty - CROW.y)*Math.min(1, dt*2.2);
+  CROW.flap += dt*(CROW.mode==='out' ? 22 : 15);
+  crowRig.visible = true;
+  crowRig.position.set(CROW.x, CROW.y, 0.6);
+  const f = Math.sin(CROW.flap);
+  crowRig.userData.pl.rotation.x = -0.25 + f*0.75; crowRig.userData.pr.rotation.x = 0.25 - f*0.75;
+  CROW.throwT = Math.max(0, (CROW.throwT||0) - dt);
+  crowRig.rotation.z = -0.12 + Math.sin(CROW.t*2.3)*0.08 - (CROW.throwT > 0 ? 0.5 : 0);
+  crowRig.rotation.x = 0.55;            // 背中をカメラに向けて、翼の形が見えるようにする
+}
+
+/* ================================================= ライバル
+   奥の車線を並走し、合図とともに前へ割り込んでくる。
+   block：前で減速して道をふさぐ（踏めば撃退）/ hover：頭上に張りつく（跳ぶと当たる）
+   drop：前から氷の機雷を落とす / doom：雪崩に飲まれる                     */
+const rvRig = buildRider({cloth:0x2a2238, clothHi:0x3d3354, scarf:0xc040ff, cloth2:0x16121f, cloth2Hi:0x221d33,
+  board:0x14121c, board2:0xff2e6a, beanie:0x16121f, beanieHi:0x2a2238, lens:0xff2e6a, lensHi:0xff7aa0,
+  flame:0xff4a8a, jet:0x4a4458});
+rvRig.visible = false; scene.add(rvRig);
+const beamMat = new THREE.MeshBasicMaterial({color:0xff2e5a, transparent:true, opacity:0, blending:THREE.AdditiveBlending,
+  depthWrite:false, fog:false, side:THREE.DoubleSide});
+const beamGeo = new THREE.CylinderGeometry(0.25, 1.15, 1, 20, 1, true); beamGeo.translate(0, -0.5, 0);
+const beam = new THREE.Mesh(beamGeo, beamMat); beam.visible = false; beam.renderOrder = 5; scene.add(beam);
+const RV_LANE = -2.8;
+const RV = { on:false, ph:'off', t:0, x:0, y:0, z:RV_LANE, base:0, jy:0, jvy:0, fly:0, tx:0, ptx:0,
+             at:0, to:0, ko:false, koT:0, crouch:0, clr:null, settleT:0, airOK:false, spin:0, hit:false };
+function rvSupport(x, maxY){
+  let best = null;
+  for(const s of world.surfaces){
+    if(s.kind==='block' || x < s.x0 || x > s.x1) continue;
+    const y = surfY(s, x);
+    if(y <= maxY && (best===null || y > best)) best = y;
+  }
+  return best;
+}
+function rvPhase(ph){ RV.ph = ph; RV.t = 0; RV.settleT = 0; RV.airOK = false; RV.clr = null; RV.newPh = true; }
+function rvFire(tr){
+  if(tr.a==='enter'){
+    RV.on = true; RV.ko = false; RV.hit = false; rvPhase('enter');
+    RV.x = G.px - 16; RV.z = RV_LANE; RV.base = floorY(RV.x); RV.jy = 0; RV.jvy = 0; RV.fly = 0; RV.spin = 0;
+    RV.ptx = RV.x; Sound.rival();
+    return;
+  }
+  if(!RV.on || RV.ko) return;             // 雪崩に飲まれた後は何も起きない
+  if(tr.a==='block'){ rvPhase('block'); RV.at = tr.at; Sound.warn(); }
+  else if(tr.a==='hover'){ rvPhase('hover'); RV.to = tr.to; Sound.warn(); }
+  else rvPhase(tr.a);                     // drop / leave / doom
+}
+function rvKO(byStomp){
+  RV.ko = true; rvPhase('ko'); RV.koT = 0; RV.jvy = byStomp ? 9 : 14; RV.jy = Math.max(RV.jy, 0.01);
+  RV.spin = byStomp ? 12 : 16;
+  emitBurst(RV.x, RV.y + 1.2, 30, byStomp ? COL.gold : COL.white);
+}
+function stomp(){
+  G.stomps++; G.vy = 14.5; G.onGround = false; G.jumpCut = !IN.jumpHeld; G.airT = 0.01; G.coyote = 0;
+  G.hitStop = 0.07; G.shake = Math.max(G.shake, 0.35); buzz([20,20,40]);
+  UI.pop.textContent = 'STOMP +500'; UI.pop.classList.add('trick'); G.popT = 1.0;
+  Sound.stomp();
+  /* 踏まれたライバルは転げて後ろへ下がり、しばらくして奥の車線から戻ってくる */
+  rvPhase('stun'); RV.jvy = 9; RV.jy = Math.max(RV.jy, 0.01); RV.spin = 12;
+  emitBurst(RV.x, RV.y + 1.2, 30, COL.gold);
+}
+function updateRival(dt){
+  for(const tr of world.rv) if(!tr.fired && G.px > tr.x){ tr.fired = true; rvFire(tr); }
+  if(!RV.on){ rvRig.visible = false; beam.visible = false; return; }
+  RV.t += dt;
+  const play = G.state==='PLAY';
+  let lane = RV_LANE, fly = 0;
+  switch(RV.ph){
+    case 'enter': RV.tx = G.px + lerp(-16, 4.5, ease(clamp(RV.t/1.6, 0, 1))); if(RV.t > 1.6) rvPhase('pace'); break;
+    case 'pace':  RV.tx = G.px + 4.5 + Math.sin(RV.t*1.3)*1.4; break;
+    case 'block':{
+      /* プレイヤーが at に来たとき、ちょうど at にいるように減速してくる */
+      RV.tx = RV.at - Math.max(0, RV.at - G.px)*0.3;
+      if(RV.x - G.px > 7 || RV.z > RV_LANE*0.5) lane = 0;
+      if(G.px > RV.x + 2.5 && G.px > RV.at - 4){ rvPhase('pass'); Sound.rival(); }
+      break; }
+    case 'pass':  RV.tx = G.px + 4.5; if(RV.t > 1.4) rvPhase('pace'); break;
+    case 'hover':{
+      RV.tx = G.px + 0.25; lane = 0;
+      const gy = floorY(G.px);
+      fly = 1;
+      if(Math.abs(RV.x - RV.tx) < 1.2 && Math.abs(RV.z) < 0.4){
+        if(RV.settleT===0) RV.airOK = !G.onGround;      // 空中にいるところへ被さってきた場合は見逃す
+        RV.settleT += dt;
+      }
+      if(RV.airOK && G.onGround) RV.airOK = false;
+      RV.hy = RV.airOK ? Math.max(gy + 3.75, G.py + (G.crouching?P.crouchH:P.standH) + 1.0) : gy + 3.75;
+      if(G.px > RV.to){ rvPhase('exit'); Sound.rival(); }
+      break; }
+    case 'exit':  RV.tx = G.px + 28; fly = 2; if(RV.t > 1.3) rvPhase('pace'); break;
+    case 'drop':{
+      RV.tx = G.px + 22; lane = 0; fly = 3;
+      for(const m of world.mines){
+        if(m.state!=='wait') continue;
+        const d = m.x - G.px;
+        if(d <= 22.5 && d >= 7 && RV.x > m.x - 3 && play){ m.state = 'fall'; m.t = 0; m.fx = RV.x; m.fy = RV.y + 0.4; Sound.mine(); }
+      }
+      break; }
+    case 'leave': RV.tx = G.px + 70; fly = 2; if(RV.x - G.px > 48){ RV.on = false; } break;
+    case 'doom':{
+      /* 失速して雪崩に飲まれる */
+      RV.tx = G.px - 22; lane = RV_LANE;
+      if(AV.on && RV.x < AV.x + 1.5){ rvKO(false); Sound.rival(); }
+      else if(RV.x < G.px - 34) RV.on = false;
+      break; }
+    case 'stun':{
+      RV.tx = G.px - 9; lane = RV_LANE;
+      if(RV.t > 1.1){ rvPhase('pace'); rvRig.rotation.z = 0; Sound.rival(); }
+      break; }
+    case 'ko':{
+      RV.koT += dt; RV.tx = RV.x;
+      if(RV.koT > 1.6) RV.on = false;
+      break; }
+  }
+  /* 横の動き：目標の速さに寄せつつ、ずれをばねで詰める */
+  if(RV.ph==='ko'){
+    RV.x += G.speed*0.25*dt; RV.z += (-7 - RV.z)*Math.min(1, dt*2);
+  }else{
+    let tv = RV.newPh ? G.speed : clamp((RV.tx - RV.ptx)/Math.max(dt, 1e-3), 0, 40);
+    RV.newPh = false;
+    RV.x += (tv + clamp((RV.tx - RV.x)*4, -15, 15))*dt;
+    RV.z += (lane - RV.z)*Math.min(1, dt*4.5);
+  }
+  RV.ptx = RV.tx;
+  /* 縦の動き：地面に沿い、穴・氷塊・機雷は跳ぶ。穴の上は滑空する */
+  const sup = rvSupport(RV.x, RV.base + 1.4);
+  if(sup!==null) RV.base += (sup - RV.base)*Math.min(1, dt*12);
+  if(RV.ph!=='ko' && RV.jy <= 0 && fly===0){
+    const la = Math.max(3, G.speed*0.26);
+    let jump = rvSupport(RV.x + la, RV.base + 1.4)===null;
+    for(const h of world.hazards) if(h.type==='block' && h.x0 > RV.x && h.x0 < RV.x + la) jump = true;
+    for(const m of world.mines) if(m.state==='on' && m.x > RV.x && m.x < RV.x + la) jump = true;
+    if(jump){ RV.jvy = 11.5; RV.jy = 0.01; }
+  }
+  if(RV.jy > 0 || RV.jvy > 0){
+    RV.jvy -= P.gravity*dt; RV.jy += RV.jvy*dt;
+    if(RV.jy <= 0 && RV.ph!=='ko'){ RV.jy = 0; RV.jvy = 0; }
+  }
+  const flyY = fly===1 ? RV.hy - RV.base : (fly===2 ? 7 : (fly===3 ? 3.2 : 0));
+  RV.fly += (flyY - RV.fly)*Math.min(1, dt*(fly===1 ? 6 : 4));
+  RV.y = RV.base + RV.jy + RV.fly;
+  let under = false;
+  for(const h of world.hazards) if(h.type==='low' && RV.x > h.x0 - 1 && RV.x < h.x1 + 1){ under = true; break; }
+  RV.crouch += ((under && RV.fly < 0.5 ? 1 : 0) - RV.crouch)*Math.min(1, dt*14);
+
+  /* --- 当たり判定（手前の車線にいるときだけ） --- */
+  if(play && RV.ph!=='ko' && Math.abs(RV.z) < 0.5){
+    const h = G.crouching ? P.crouchH : P.standH, dx = G.px - RV.x;
+    const rh = RV.crouch > 0.5 ? 1.2 : 1.9;
+    if(RV.ph==='block'){
+      if(Math.abs(dx) < 1.1){
+        RV.clr = RV.clr==null ? G.py - (RV.y+rh) : Math.min(RV.clr, G.py - (RV.y+rh));
+        if(G.vy < -1 && G.py > RV.y + 1.0 && G.py < RV.y + rh + 0.6) stomp();
+        else if(Math.abs(dx) < 0.85 && G.py < RV.y + rh - 0.1 && G.py + h > RV.y + 0.1 && G.invuln <= 0){
+          G.lastHit = {src:'rival', x:+RV.x.toFixed(1)}; hurt(); }
+      }else if(RV.clr!=null && dx > 1.1){ if(RV.clr < P.nearMiss && RV.clr > -0.5) nearMiss(RV.x, RV.y+rh); RV.clr = null; }
+    }else if(RV.ph==='hover' && RV.settleT > 0.3 && !RV.airOK){
+      if(Math.abs(dx) < 1.2 && G.py + h > RV.y + 0.15 && G.invuln <= 0){
+        G.lastHit = {src:'rival-hover', x:+RV.x.toFixed(1)}; hurt(); }
+    }
+  }
+  /* --- 見た目 --- */
+  rvRig.visible = true;
+  rvRig.position.set(RV.x, RV.y, RV.z);
+  const u = rvRig.userData, cu = RV.crouch;
+  let rz = RV.jy > 0 ? clamp(-RV.jvy*0.02, -0.3, 0.25) : 0;
+  if(RV.ph==='hover') rz = 0.28 + Math.sin(G.t*9)*0.05;
+  if(RV.ph==='drop' || RV.ph==='exit' || RV.ph==='leave') rz = 0.12;
+  if(RV.ph==='ko' || (RV.ph==='stun' && RV.jy > 0)) rvRig.rotation.z += RV.spin*dt;
+  else {
+    const r0 = rvRig.rotation.z, r = Math.atan2(Math.sin(r0), Math.cos(r0));   // 回転し終えた角度を戻す
+    rvRig.rotation.z = r + (rz - r)*Math.min(1, dt*10);
+  }
+  u.gLegs.scale.y = 1 - 0.46*cu; u.gTorso.position.y = 0.96 - 0.44*cu; u.gHead.position.y = 1.62 - 0.60*cu;
+  u.gTorso.rotation.z = -(0.20 + 0.60*cu);
+  const fl = 1.3 + Math.sin(G.t*38)*0.2 + (RV.fly > 0.5 ? 0.9 : 0);
+  u.flame.scale.set(fl, 1.2, 1.2); u.flame2.scale.set(fl*0.8, 1, 1);
+  u.flame.material.opacity = RV.ph==='ko' ? 0 : 0.9; u.flame2.material.opacity = RV.ph==='ko' ? 0 : 0.8;
+  if(Math.random() < 0.7 && RV.ph!=='ko'){
+    const c = Math.cos(rvRig.rotation.z), s = Math.sin(rvRig.rotation.z);
+    glows.emit(RV.x - 1.45*c, RV.y + 0.3 - 1.45*s, RV.z, -4 - Math.random()*3, (Math.random()-0.5)*1.5 - (RV.fly>0.5?3:0), 0,
+      {life:0.25 + Math.random()*0.15, s0:0.55, s1:0.1, a:0.9, drag:2, col:COL.rival});
+  }
+  /* 頭上に張りつくときの警告の光 */
+  if(RV.ph==='hover' || (RV.ph==='exit' && RV.t < 0.3)){
+    const gy = floorY(RV.x);
+    beam.visible = true;
+    beam.position.set(RV.x, RV.y + 0.1, RV.z);
+    beam.scale.set(1, Math.max(0.5, RV.y + 0.1 - gy), 1);
+    const on = RV.ph==='hover' ? clamp(RV.t*3, 0, 1) : clamp(1 - RV.t/0.3, 0, 1);
+    beamMat.opacity = on * (RV.settleT > 0.3 ? 0.30 + 0.12*Math.sin(G.t*22) : 0.12 + 0.12*Math.sin(G.t*30));
+  }else beam.visible = false;
+}
+
+/* ================================================= 氷の機雷
+   ライバルが前から落としていく。台本にある位置にしか落ちない。 */
+function mineGeo(){
+  const gb = new GB();
+  gb.taper(0, 0, 0, 0.9, 0.9, 1.0, 1.0, 0.45, 0x2a2238, {top:0x3d3354});
+  gb.taper(0, 0.45, 0, 1.0, 1.0, 0.6, 0.6, 0.35, 0x3d3354, {top:0x4a4060});
+  for(let k=0;k<6;k++){
+    const a = k/6*Math.PI*2;
+    gb.spike(Math.cos(a)*0.5, 0.2, Math.sin(a)*0.5, 0.2, 0.55, 0x9ff0ff);
+  }
+  gb.spike(0, 0.8, 0, 0.2, 0.3, 0x9ff0ff);
+  return gb.geo();
+}
+const MINE_GEO = mineGeo();
+const mineLampGeo = new THREE.BoxGeometry(0.22, 0.14, 0.22);
+function updateMines(dt){
+  for(const m of world.mines){
+    if(m.state==='wait' || m.state==='gone'){ if(m.mesh){ scene.remove(m.mesh); m.mesh = null; } continue; }
+    if(!m.mesh){
+      m.mesh = new THREE.Mesh(MINE_GEO, propMat); m.mesh.castShadow = true;
+      m.lamp = new THREE.Mesh(mineLampGeo, new THREE.MeshBasicMaterial({color:0xff2e5a, fog:false}));
+      m.lamp.position.y = 0.95; m.mesh.add(m.lamp); scene.add(m.mesh);
+    }
+    if(m.state==='fall'){
+      m.t += dt/0.32;
+      const t = Math.min(1, m.t);
+      m.mesh.position.set(lerp(m.fx, m.x, t), lerp(m.fy, m.y, t*t), 0);
+      m.mesh.rotation.z = (1-t)*5;
+      if(m.t >= 1){ m.state = 'on'; emitSpray(m.x, m.y + 0.1, 0, 10, 3, 3); Sound.clank(); G.shake = Math.max(G.shake, 0.12); }
+    }else{
+      m.mesh.position.set(m.x, m.y, 0); m.mesh.rotation.set(0, G.t*1.5, 0);
+      m.lamp.visible = Math.floor(G.t*6) % 2 === 0;
+    }
+    if(m.x < G.px - 30){ m.state = 'gone'; }
+  }
+}
+/* 機雷の当たり（氷塊と同じく跳んで越える） */
+function hitMines(x0, x1){
+  for(const m of world.mines){
+    if(m.state!=='on') continue;
+    const a = m.x - 0.55, b = m.x + 0.55, top = m.y + 0.95;
+    if(x1 < a || x0 > b){
+      if(m._clr!=null && x0 > b){ if(m._clr < P.nearMiss) nearMiss(m.x, top + 0.3); m._clr = null; }
+      continue;
+    }
+    const clr = G.py - top;
+    m._clr = m._clr==null ? clr : Math.min(m._clr, clr);
+    if(G.py < top){ G.lastHit = {src:'mine', x:+m.x.toFixed(1), py:+G.py.toFixed(2)}; hurt(); return true; }
+  }
+  return false;
+}
+
+/* ================================================= 雪崩
+   最終ゲートで山が崩れ、背後から迫ってくる。勢いを保っていれば
+   画面の左端で追ってくるだけだが、減速したり被弾したりすると追いつかれる。 */
+const AV = { on:false, x:0, t:0, k:0, rumble:0, stopX:null, pourT:0, fade:0, chunkT:0, emitAcc:0 };
+const avChunks = [];
+(function(){
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  for(let i=0;i<10;i++){
+    const m = new THREE.Mesh(geo, propMat); m.visible = false; m.castShadow = true;
+    scene.add(m); avChunks.push({m, life:0, vx:0, vy:0, vz:0, r:0});
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(new Array(geo.attributes.position.count*3).fill(0.93), 3));
+})();
+const _avc = new THREE.Color(), _avd = new THREE.Color();
+/* 雪崩の本体：左側を埋める雪の壁。右端は泡立つ形に切ってあり、その上に雪煙を重ねる */
+const avWall = (function(){
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const x = cv.getContext('2d'), rnd = mulberry(0xa7a1);
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.55, '#e4ecf8'); g.addColorStop(1, '#9aa8c4');
+  x.fillStyle = g; x.fillRect(0, 0, 150, 256);
+  for(let i=0;i<46;i++){
+    const yy = rnd()*256, r = 14 + rnd()*30, xx = 140 + rnd()*70 - r*0.3;
+    x.beginPath(); x.arc(xx, yy, r, 0, Math.PI*2); x.fill();
+  }
+  for(let i=0;i<24;i++){                                  // 上端もでこぼこに
+    const xx = rnd()*230, r = 12 + rnd()*26;
+    x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.arc(xx, -r*0.2, r*0.8, 0, Math.PI*2); x.fill();
+    x.globalCompositeOperation = 'source-over';
+  }
+  const t = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map:t, transparent:true,
+    depthWrite:false, fog:true}));
+  m.scale.set(46, 30, 1); m.visible = false; m.renderOrder = 4; scene.add(m);
+  return m;
+})();
+function avFire(tr){
+  if(tr.a==='rumble'){ AV.rumble = 1; Sound.crack(); G.shake = Math.max(G.shake, 0.18); }
+  else if(tr.a==='go'){
+    AV.on = true; AV.t = 0; AV.x = G.px - 26; AV.stopX = null; AV.pourT = 0; AV.fade = 1;
+    Sound.avalanche(); flash(0.35); G.shake = Math.max(G.shake, 1.0); buzz([60,30,90]);
+  }
+  else if(tr.a==='stop'){ AV.stopX = tr.x; }
+}
+function updateAvalanche(dt){
+  for(const tr of world.aval) if(!tr.fired && G.px > tr.x){ tr.fired = true; avFire(tr); }
+  const live = G.state==='PLAY' || G.state==='DEAD';
+  if(AV.on && live){
+    AV.t += dt;
+    /* 雪崩も坂では速さが変わる（上りの踏み切り坂で理不尽に追いつかない） */
+    let slope = 0;
+    for(const s of world.surfaces) if(s.kind==='ground' && AV.x>=s.x0 && AV.x<=s.x1){ slope = surfSlope(s); break; }
+    const nominal = (speedAt(world, clamp(G.px/world.length, 0, 1)) + 0.6)*clamp(1 - slope*1.1, 0.8, 1.3), prevX = AV.x;
+    AV.x += nominal*dt;
+    const lagMax = lerp(26, 7.5, ease(clamp(AV.t/1.4, 0, 1)));
+    if(G.state==='PLAY') AV.x = Math.max(AV.x, G.px - lagMax);
+    if(AV.stopX!==null && AV.x >= AV.stopX){
+      AV.x = AV.stopX;
+      if(AV.pourT===0){ Sound.avalancheFall(); G.shake = Math.max(G.shake, 0.6); }
+      AV.pourT += dt;
+      if(AV.pourT > 1.8) AV.on = false;
+    }
+    /* 追いつかれたら被弾して、雪崩の勢いで前へ弾き出される */
+    if(G.finale >= 1) AV.x = Math.min(AV.x, G.px - 4.5);          // 大詰めでは追いつかない（真後ろまでは迫る）
+    if(G.state==='PLAY' && AV.x > G.px - 0.9 && AV.stopX===null && AV.t > 1.4){
+      if(G.invuln <= 0){ G.lastHit = {src:'avalanche', x:+G.px.toFixed(1)}; hurt(); }
+      AV.x = G.px - 6;
+    }
+    const vFront = dt > 0 ? clamp((AV.x - prevX)/dt, 0, 40) : nominal;
+    AV.k = clamp(1 - (G.px - AV.x - 2)/10, 0, 1);
+    if(AV.stopX!==null && AV.pourT > 0) AV.k *= Math.max(0, 1 - AV.pourT);
+    /* 雪崩の壁：先頭付近に大きな雪煙を吹き出し続ける */
+    _avc.copy(snowCol()).multiplyScalar(0.92);
+    _avd.copy(_avc).lerp(AT.hemG, 0.45);
+    AV.emitAcc += dt*(IS_MOBILE ? 70 : 110);
+    while(AV.emitAcc > 1){
+      AV.emitAcc -= 1;
+      const back = Math.random()*6 - 1.5, x = AV.x - back, gy = floorY(x);
+      const hy = Math.pow(Math.random(), 0.7)*17;
+      const s = 5 + Math.random()*5 + hy*0.22;
+      const pour = AV.pourT > 0;
+      avFx.emit(x + (pour ? Math.random()*2 : 0), gy - 1 + hy, -6 + Math.random()*13,
+        pour ? 4 + Math.random()*4 : vFront*(0.92 + Math.random()*0.12), pour ? -6 - Math.random()*8 : Math.random()*2.5, 0,
+        {life:0.7 + Math.random()*0.5, s0:s*0.7, s1:s*1.4, a:0.92, g:pour ? 14 : 0, spin:(Math.random()-0.5)*1.2,
+         col: hy < 4 ? _avd : _avc});
+    }
+    /* 前へ飛び散る雪の塊と細かい光 */
+    AV.chunkT -= dt;
+    if(AV.chunkT <= 0 && AV.pourT===0){
+      AV.chunkT = 0.10 + Math.random()*0.12;
+      const c = avChunks.find(c=>c.life<=0);
+      if(c){ const s = 0.4 + Math.random()*0.9;
+        c.life = 1.2; c.m.visible = true; c.m.scale.set(s, s*0.8, s);
+        c.m.position.set(AV.x + 1, floorY(AV.x) + 1 + Math.random()*6, -4 + Math.random()*8);
+        c.vx = vFront + 3 + Math.random()*6; c.vy = 3 + Math.random()*7; c.vz = (Math.random()-0.5)*4; c.r = (Math.random()-0.5)*10; }
+    }
+    /* 壁の本体 */
+    if(AV.pourT===0 || AV.pourT < 1.2){
+      const wy = floorY(AV.x - 8);
+      avWall.visible = true;
+      avWall.material.color.copy(_avc).multiplyScalar(AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : 1);
+      avWall.material.opacity = AV.pourT > 0 ? Math.max(0, 1 - AV.pourT/1.2) : clamp(AV.t*1.5, 0, 1);
+      avWall.position.set(AV.x - 23 + 0.5 + Math.sin(G.t*7)*0.3, wy - 4 + 15 + (AV.pourT > 0 ? -AV.pourT*14 : 0), 4.2);
+    }else avWall.visible = false;
+    if(Math.random() < 0.6) glows.emit(AV.x + 1.5, floorY(AV.x) + Math.random()*8, Math.random()*4, vFront + 4, Math.random()*3, 0,
+      {life:0.4, s0:0.35, s1:0.05, a:0.8, g:3, col:COL.ice});
+  }else if(!AV.on){ AV.k += (0 - AV.k)*Math.min(1, dt*3); avWall.visible = false; }
+  for(const c of avChunks){
+    if(c.life <= 0) continue;
+    c.life -= dt; c.vy -= 26*dt;
+    c.m.position.x += c.vx*dt; c.m.position.y += c.vy*dt; c.m.position.z += c.vz*dt;
+    c.m.rotation.x += c.r*dt; c.m.rotation.z += c.r*0.7*dt;
+    const gy = terrainY(c.m.position.x);
+    if((gy!==null && c.m.position.y < gy) || c.life <= 0){
+      if(gy!==null) emitSpray(c.m.position.x, gy + 0.1, c.m.position.z, 4, 3, 2);
+      c.life = 0; c.m.visible = false;
+    }
+  }
+  /* 予兆：山鳴りが続き、画面が小刻みに揺れ、上から雪の塊が崩れ落ちてくる */
+  if(AV.rumble > 0 && !AV.on && G.state==='PLAY'){
+    G.shake = Math.max(G.shake, 0.06);
+    AV.chunkT -= dt;
+    if(AV.chunkT <= 0){
+      AV.chunkT = 0.22 + Math.random()*0.3;
+      const c = avChunks.find(c=>c.life<=0);
+      if(c){ const s = 0.5 + Math.random()*1.1, x = G.px + 8 + Math.random()*26;
+        c.life = 2.0; c.m.visible = true; c.m.scale.set(s, s*0.8, s);
+        c.m.position.set(x, floorY(x) + 16 + Math.random()*6, -4.5 - Math.random()*5);
+        c.vx = G.speed*0.2; c.vy = -4 - Math.random()*4; c.vz = 0; c.r = (Math.random()-0.5)*8;
+        emitSpray(x, floorY(x) + 18, c.m.position.z, 3, 2, 1); }
+    }
+  }
+  const level = AV.on ? 0.35 + 0.65*AV.k : (AV.rumble > 0 && G.state==='PLAY' ? 0.25 : 0);
+  Sound.rumble(G.state==='PLAY' || G.state==='DEAD' ? level : 0);
+  if(AV.on && G.state==='PLAY') G.shake = Math.max(G.shake, 0.08 + 0.22*AV.k);
+  UI.aval.style.opacity = (AV.on ? AV.k*0.85 : 0).toFixed(3);
+}
+
+/* ================================================= 大詰め
+   踏み切ると音楽が途切れ、頂点でスローになり、着地で全部が戻ってくる。 */
+function updateFinale(dt){
+  for(const f of world.fins){
+    if(!f.fired && G.px > f.x && G.state==='PLAY'){ f.fired = true; G.finale = 1; UI.lb.classList.add('on'); Sound.finale(); }
+  }
+  G.finCam += ((G.finale===2 ? 1 : (G.finale===1 ? 0.35 : 0)) - G.finCam)*Math.min(1, dt*2.5);
+  if(G.state==='CLEAR'){
+    G.fwT -= dt;
+    if(G.fwT <= 0 && G.clearT < 1.7){
+      G.fwT = 0.22 + Math.random()*0.2;
+      const cols = [COL.gold, COL.ice, COL.rival, COL.warm];
+      const x = G.px + 8 + Math.random()*22, y = G.py + 7 + Math.random()*7;
+      emitBurst(x, y, 40, cols[Math.floor(Math.random()*cols.length)]);
+      Sound.firework();
+    }
+  }
+}
+function finaleTakeoff(){
+  if(G.finale!==1) return;
+  G.finale = 2; Sound.drop();
+}
+function finaleLand(){
+  if(G.finale!==2) return;
+  G.finale = 3; UI.lb.classList.remove('on');
+  Sound.impact(); flash(0.3); G.shake = Math.max(G.shake, 0.8); buzz([40,20,80]);
+  emitRing(G.px, G.py, 30, 12); emitBurst(G.px, G.py + 1.5, 60, COL.gold); emitBurst(G.px, G.py + 2, 40, COL.ice);
+}
+const silWarm = new THREE.Mesh(SIL_GEO, silMatJump); silWarm.visible = false; scene.add(silWarm);
+const lampWarm = new THREE.Mesh(mineLampGeo, new THREE.MeshBasicMaterial({color:0xff2e5a, fog:false})); lampWarm.visible = false; scene.add(lampWarm);
+function warmList(){ return [crowRig, rvRig, bombMesh, beam, avWall, silWarm, lampWarm, ...avChunks.map(c=>c.m)]; }
+function resetSetPieces(){
+  for(const tr of world.rv) tr.fired = false;
+  for(const tr of world.crow) tr.fired = false;
+  for(const tr of world.aval) tr.fired = false;
+  for(const f of world.fins) f.fired = false;
+  for(const z of world.smokes){ z.state = 'idle'; z.t = 0; }
+  for(const m of world.mines){ m.state = 'wait'; m._clr = null; if(m.mesh){ scene.remove(m.mesh); m.mesh = null; } }
+  for(const s of sils){ scene.remove(s.m); s.m.material.dispose(); } sils.length = 0;
+  smokeFx.clear(); avFx.clear();
+  CROW.on = false; CROW.mode = 'off'; CROW.bomb = null; bombMesh.visible = false; crowRig.visible = false;
+  RV.on = false; RV.ko = false; RV.ph = 'off'; rvRig.visible = false; beam.visible = false; rvRig.rotation.set(0,0,0);
+  AV.on = false; AV.k = 0; AV.rumble = 0; AV.stopX = null; AV.pourT = 0; avWall.visible = false;
+  for(const c of avChunks){ c.life = 0; c.m.visible = false; }
+  G.finale = 0; G.finCam = 0; G.fwT = 0; G.stomps = 0;
+  UI.lb.classList.remove('on'); UI.aval.style.opacity = 0;
+}
+function updateSetPieces(dt){
+  if(G.state==='TITLE'){ smokeFx.update(dt, smokeK); avFx.update(dt, smokeK); return; }
+  if(!G.paused){
+    updateCrow(dt);
+    updateRival(dt);
+    updateMines(dt);
+    updateAvalanche(dt);
+    updateFinale(dt);
+  }
+  smokeFx.update(dt, smokeK);
+  avFx.update(dt, smokeK);
+}
+
 /* ======================================================== ゲーム進行 */
 const _m4 = new THREE.Object3D();
 function supportAt(x, maxY){
@@ -2336,6 +3179,7 @@ function rampBoost(){
     Sound.launch(); G.shake = Math.max(G.shake, 0.28);
     /* 大きく飛んだら自動で宙返り。着地までに回り切るよう滞空時間から速さを決める */
     if(G.vy > 15 && G.state==='PLAY'){ G.flip = 0; G.flipDur = Math.max(0.55, 2*G.vy/P.gravity*0.86); G.apexSlow = true; }
+    finaleTakeoff();
   }
 }
 function flipDone(){
@@ -2393,7 +3237,11 @@ function stepPlay(dt){
     const cand = supportAt(G.px, prevFeet + climb);
     if(cand && (G.py <= cand.y || G.py - cand.y <= stick)) sup = cand;
   }
-  if(G.apexSlow && G.flip >= 0 && G.vy <= 0){ G.apexSlow = false; G.slowT = 0.32; G.slowK = 0.42; }
+  if(G.apexSlow && G.flip >= 0 && G.vy <= 0){
+    G.apexSlow = false;
+    if(G.finale===2){ G.slowT = 0.80; G.slowK = 0.26; }          // 大詰めは頂点で長く止める
+    else { G.slowT = 0.32; G.slowK = 0.42; }
+  }
   if(sup){
     if(!wasGround){
       Sound.land(); emitSpray(G.px-0.3, sup.y+0.05, 0, 10, 3.2, 2.4);
@@ -2405,6 +3253,7 @@ function stepPlay(dt){
         else { G.flip = -1; if(rider.rotation.z > Math.PI) rider.rotation.z -= Math.PI*2; }
       }
       G.camDip = Math.min(0.85, Math.abs(G.vy)*0.035 + 0.12);   // 着地の沈み込み
+      if(G.finale===2) finaleLand();
       /* 縁すれすれの着地もニアミス扱い */
       if(G.airT > 0.28 && G.px - sup.s.x0 < 1.5 && sup.s.x0 > 1) nearMiss(G.px, sup.y+0.6);
     }
@@ -2441,6 +3290,8 @@ function stepPlay(dt){
                  y0:+hz.y0.toFixed(2)};
       hurt(); break; }
   }
+  /* --- 機雷 --- */
+  if(G.state==='PLAY') hitMines(x0, x1);
   /* --- 敵 --- */
   for(const e of world.enemies){
     const d = ENEMY_DEF[e.kind];
@@ -2677,7 +3528,7 @@ function updateCamera(dt){
   camera.updateProjectionMatrix();
   G.camAir += ((G.onGround ? 0 : clamp(G.airT-0.25, 0, 0.9)) - G.camAir) * Math.min(1, dt*2.6);
   const intro = G.introT > 0 ? ease(G.introT/(G.introMax||1)) : 0;
-  const halfW = (lerp(P.viewW, P.viewWFast, sk) + G.camAir*7 + intro*14)/2;
+  const halfW = (lerp(P.viewW, P.viewWFast, sk) + G.camAir*7 + intro*14 + G.finCam*8)/2;
   const dist = halfW/(Math.tan(camera.fov*Math.PI/360)*camera.aspect);
   /* 先の地形を見てカメラを構える（落ちる前に落ちる先が見える） */
   const ya = terrainY(G.px + 20);
@@ -2759,13 +3610,13 @@ function frame(now){
   if(G.introT > 0) G.introT = Math.max(0, G.introT - dt);
   if(G.splitT > 0){ G.splitT -= dt; if(G.splitT <= 0) UI.split.style.opacity = 0; }
   updateEnemies(dt);
+  updateSetPieces(dt);
   updateItems(dt);
   updateParticles(dt, camX, G.camY);
   if(G.state==='PLAY' && !G.paused){
     updateHUD();
     Sound.speed(G.speed, IN.brake, G.boost);
-    const pr = G.px/world.length;
-    Sound.update(G.rush ? 'storm' : (pr > 0.715 ? 'rise' : (pr > 0.60 ? 'calm' : 'main')));
+    Sound.update(G.rush ? 'storm' : (AV.rumble > 0 ? 'rise' : (G.px > world.marks.w5_rail - 10 ? 'calm' : 'main')));
   }else if(G.state==='TITLE'){
     Sound.speed(6, false);
   }
@@ -2821,7 +3672,7 @@ toTitle();
 precompile();
 requestAnimationFrame(frame);
 window.JBR = {G, IN, world, P, CLIMATES, Store, compile, CHUNKS, STAGES, speedAt, inIce, renderer, scene, camera, Sound,
-              sun, setQuality, QUALITY, AT, PF}; // 調整・検証用
+              sun, setQuality, QUALITY, AT, PF, RV, AV, CROW}; // 調整・検証用
 </script>
 </body>
 </html>
