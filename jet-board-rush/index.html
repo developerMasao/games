@@ -51,6 +51,26 @@
         text-shadow:0 0 26px rgba(120,220,255,.95),0 4px 10px rgba(0,0,0,.6);}
   #hint .cap{margin-top:6px;font-size:clamp(11px,2.2vh,15px);letter-spacing:.32em;color:#bfe7ff;opacity:.9;}
   #hint.show{opacity:1;}
+  /* 操作の合図（右下）。外の輪が縮みきった瞬間が押すタイミング */
+  #cue{position:fixed;right:calc(4vw + env(safe-area-inset-right));bottom:calc(15vh + env(safe-area-inset-bottom));
+       z-index:12;pointer-events:none;display:flex;align-items:center;gap:12px;opacity:0;
+       transform:translateX(12px);transition:opacity .12s,transform .12s;}
+  #cue.show{opacity:1;transform:none;}
+  #cue .dial{position:relative;width:clamp(54px,12vh,86px);height:clamp(54px,12vh,86px);}
+  #cue .core{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;
+             font-weight:900;font-size:clamp(24px,6vh,40px);color:#fff;background:rgba(10,24,44,.55);
+             border:3px solid currentColor;text-shadow:0 2px 6px rgba(0,0,0,.5);}
+  #cue .ring{position:absolute;inset:0;border-radius:50%;border:3px solid currentColor;opacity:.75;}
+  #cue .word{font-weight:900;font-size:clamp(18px,4.6vh,32px);letter-spacing:.06em;color:#fff;
+             text-shadow:0 2px 8px rgba(0,0,0,.6);white-space:nowrap;}
+  #cue.jump{color:#ffd23f;} #cue.duck{color:#5fe0ff;} #cue.stay{color:#ff4a6a;}
+  #cue.now .core{background:currentColor;color:#0a1830;text-shadow:none;animation:cuepop .22s ease-out;}
+  @keyframes cuepop{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+  #cueBtn{position:fixed;z-index:14;right:calc(52px + env(safe-area-inset-right));
+          bottom:calc(10px + env(safe-area-inset-bottom));height:34px;padding:0 10px;border-radius:17px;
+          border:1px solid rgba(150,215,255,.3);background:rgba(8,22,40,.45);color:#bfe3ff;
+          font-size:12px;letter-spacing:.12em;line-height:32px;cursor:pointer;opacity:.5;}
+  #cueBtn:hover{opacity:1;} #cueBtn.off{text-decoration:line-through;opacity:.35;}
 
   /* ---- 全画面オーバーレイ ---- */
   .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
@@ -187,6 +207,8 @@
 <div id="split"></div>
 <div id="go">GO!</div>
 <div id="hint"><div class="glyph" id="hintGlyph">▲</div><div class="cap" id="hintCap"></div></div>
+<div id="cue"><div class="dial"><div class="ring" id="cueRing"></div><div class="core" id="cueGlyph">▲</div></div>
+  <div class="word" id="cueWord">ジャンプ</div></div>
 
 <div id="title" class="screen">
   <div class="logo">JET BOARD<br>RUSH<em>FROST RIDGE</em></div>
@@ -210,6 +232,7 @@
 <div id="orient"><div class="ph"></div><p>横向きにしてください</p></div>
 <div id="pauseNote" class="show" style="display:none">PAUSE<small>ESC で再開 ／ R でやり直し</small></div>
 <div id="sound">♪</div>
+<div id="cueBtn">合図</div>
 <div id="qnote"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -327,8 +350,7 @@ const CHUNKS = {
   /* ---- 導入 8秒。スタート直後は何も置かず（結晶だけ）、3秒後から操作を1つずつ教える ---- */
   teach: {len:84, terrain:[[54,0],['gap',5],[25,0]], ents:[
     {t:'coins',x:10,y:0.9,n:5,dx:2.6},                                   // 滑るだけで取れる
-    {t:'hint',x:28,icon:'duck'}, {t:'low',x:42,w:4,y:1.30},
-    {t:'hint',x:44,icon:'jump'},
+    {t:'low',x:42,w:4,y:1.30},
     {t:'coins',x:38,y:0.65,n:4,dx:2.6},
     {t:'coins',x:52,y:2.0,n:4,dx:2.8,arc:1.4},
     {t:'block',x:72,h:1.4,w:1.4},{t:'coin',x:72,y:2.8}]},
@@ -1795,6 +1817,7 @@ addEventListener('keydown', e=>{
   if(e.code==='Escape'){ togglePause(); return; }
   if(e.code==='KeyM'){ Sound.toggle(); return; }
   if(e.code==='KeyG'){ setQuality((qIdx+1) % QUALITY.length, true); return; }
+  if(e.code==='KeyC'){ setCueOn(!CUE.on); return; }
   if(e.code==='KeyR' && (G.state==='PLAY' || G.state==='DEAD' || (G.state==='RESULT' && G.resultT > 0.3))){
     startGame(true); return; }
   const r = keyRole(e.code);
@@ -1820,7 +1843,7 @@ function syncInput(){
 }
 function onDown(e){
   const t = e.target;
-  if(t && t.id==='sound') return;
+  if(t && (t.id==='sound' || t.id==='cueBtn')) return;
   e.preventDefault();
   IN.anyPress = true;
   if(!pointers.size) Sound.unlock();
@@ -2045,6 +2068,14 @@ const Sound = {
   firework(){ if(!this.ready||!this.on) return; const t=this.now();
     this.noiseHit(t, 0.08, 0.22, 'lowpass', 2500, 400);
     for(let i=0;i<5;i++) this.noiseHit(t+0.1+Math.random()*0.35, 0.03, 0.07, 'highpass', 6000, null, null, true); },
+  /* 合図：出たときは小さく、押す瞬間にはっきり鳴らす */
+  cueIn(){ if(!this.ready||!this.on) return; this.tone(1760, 0.04, 'sine', 0.035); },
+  cueJump(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(988, 0.06, 'square', 0.10, null, t); this.tone(1480, 0.08, 'square', 0.10, null, t+0.06); },
+  cueDuck(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(660, 0.06, 'square', 0.10, null, t); this.tone(440, 0.10, 'square', 0.10, null, t+0.06); },
+  cueStay(){ if(!this.ready||!this.on) return; const t=this.now();
+    this.tone(220, 0.09, 'sawtooth', 0.10, null, t); this.tone(220, 0.09, 'sawtooth', 0.10, null, t+0.13); },
   rumble(level){ if(!this.ready) return;
     this.rumbleG.gain.setTargetAtTime(this.on ? level*0.6 : 0, this.ctx.currentTime, 0.15); },
 
@@ -2279,6 +2310,7 @@ function resetRun(state){
   for(const e of world.enemies){ e.x=e.home; e.alive=true; e.ph=Math.random()*6.28;
     if(e.mesh){ scene.remove(e.mesh); e.mesh=null; } }
   resetSetPieces();
+  if(typeof resetCues==='function') resetCues();
   for(const h of world.hints) h.fired = Store.cleared();     // 一度クリアしたら出さない
   for(const c of rider.userData.clothes) c.visible = true;
   rider.visible = true; rider.rotation.set(0,0,0);
@@ -3148,6 +3180,85 @@ function updateSetPieces(dt){
   avFx.update(dt, smokeK);
 }
 
+/* ====================================================== 操作の合図（右下）
+   コースのデータから「いつ何をするか」を計算して出す。障害物と穴の位置は
+   コードが全部知っているので、ランダム生成のコースでも同じ仕組みで正確に出せる。
+   外の輪が縮みきった瞬間が押すタイミングで、そのとき音が鳴る。 */
+const CUE_T = { jump:0.26, gap:0.09, duck:0.36, stomp:0.40 };   // 押す瞬間（当たる何秒前か）
+const CUE_LEAD = 0.70;                                          // その何秒前から出すか
+const CUE_TXT = {
+  jump:{g:'▲', w:'ジャンプ', cls:'jump'}, gap:{g:'▲', w:'ジャンプ', cls:'jump'}, stomp:{g:'▲', w:'ふめ！', cls:'jump'},
+  duck:{g:'▼', w:'しゃがめ', cls:'duck'}, stay:{g:'✕', w:'跳ぶな', cls:'stay'} };
+const CUE = { on:true, idx:0, list:[], cur:null, key:'', nowKey:'', nowT:0 };
+try{ CUE.on = localStorage.getItem('jetboardrush.cue') !== '0'; }catch(e){}
+const cueEl = el('cue'), cueRing = el('cueRing'), cueGlyph = el('cueGlyph'), cueWord = el('cueWord'), cueBtn = el('cueBtn');
+function buildCues(W){
+  const L = [];
+  for(const h of W.hazards) L.push({kind: h.type==='low' ? 'duck' : 'jump', x:h.x0, x1:h.x1, id:'h'+L.length});
+  const gr = W.surfaces.filter(s=>s.kind==='ground').sort((a,b)=>a.x0-b.x0);
+  for(let i=0;i<gr.length-1;i++) if(gr[i+1].x0 - gr[i].x1 > 0.5) L.push({kind:'gap', x:gr[i].x1, x1:gr[i+1].x0, id:'g'+i});
+  return L.sort((a,b)=>a.x-b.x);
+}
+CUE.list = buildCues(world);
+function setCueOn(on){
+  CUE.on = on; try{ localStorage.setItem('jetboardrush.cue', on ? '1' : '0'); }catch(e){}
+  cueBtn.classList.toggle('off', !on);
+  if(!on) cueEl.classList.remove('show');
+}
+cueBtn.addEventListener('click', e=>{ e.stopPropagation(); setCueOn(!CUE.on); });
+cueBtn.addEventListener('pointerdown', e=>e.stopPropagation());
+setCueOn(CUE.on);
+function resetCues(){ CUE.idx = 0; CUE.cur = null; CUE.key = ''; CUE.nowKey = ''; cueEl.classList.remove('show','now'); }
+/* 次にやるべきことを1つ選ぶ（押す瞬間までの残り秒 t が一番小さいもの） */
+function pickCue(){
+  const v = Math.max(1, G.speed), px = G.px;
+  let best = null;
+  const consider = (kind, x, x1, id, vr) => {
+    const rel = vr || v;
+    const t = (x - px)/rel - CUE_T[kind];
+    if(kind==='duck'){ if(px > x1 + 0.3 || t > CUE_LEAD) return; }
+    else if(t < -0.18 || t > CUE_LEAD) return;
+    if(!best || t < best.t) best = {kind, t, id};
+  };
+  const L = CUE.list;
+  while(CUE.idx < L.length && L[CUE.idx].x1 < px - 1) CUE.idx++;
+  for(let i=CUE.idx; i<L.length && L[i].x - px < v*(CUE_LEAD+0.5) + 2; i++){
+    const c = L[i]; consider(c.kind, c.x, c.x1, c.id);
+  }
+  for(let i=0;i<world.mines.length;i++){ const m = world.mines[i];
+    if(m.state==='on' || m.state==='fall') consider('jump', m.x-0.55, m.x+0.55, 'm'+i); }
+  for(const e of world.enemies){
+    const d = ENEMY_DEF[e.kind];
+    if(e.kind==='flyer') consider('duck', e.x - d.w/2, e.x + d.w/2, 'e'+e.id, v + d.spd);
+    else consider('jump', e.x - d.w/2, e.x + d.w/2, 'e'+e.id, v + d.spd);
+  }
+  if(RV.on && RV.ph==='block' && Math.abs(RV.z) < 0.6) consider('stomp', RV.x - 1, RV.x + 1, 'rv'+RV.at, v*0.7);
+  /* 頭上に張りつかれている間は「跳ぶな」を最優先（穴が迫っていなければ） */
+  if(RV.on && RV.ph==='hover' && Math.abs(RV.x - px) < 3 && !(best && best.kind==='gap' && best.t < 0.3))
+    best = {kind:'stay', t:0, id:'hover'+RV.to};
+  return best;
+}
+function updateCue(dt){
+  if(!CUE.on || G.state!=='PLAY' || G.paused){ if(cueEl.classList.contains('show')) cueEl.classList.remove('show'); return; }
+  const c = pickCue();
+  if(!c){ if(CUE.cur){ cueEl.classList.remove('show'); CUE.cur = null; } return; }
+  const T = CUE_TXT[c.kind];
+  if(CUE.key !== c.id){
+    CUE.key = c.id; CUE.cur = c;
+    cueEl.className = 'show ' + T.cls; cueGlyph.textContent = T.g; cueWord.textContent = T.w;
+    if(c.kind==='stay') Sound.cueStay(); else Sound.cueIn();
+  }
+  /* 輪が縮みきったら押す */
+  const k = c.kind==='stay' ? 0 : clamp(c.t/CUE_LEAD, 0, 1);
+  cueRing.style.transform = 'scale(' + (1 + k*0.9).toFixed(3) + ')';
+  cueRing.style.opacity = (0.35 + (1-k)*0.6).toFixed(2);
+  if(c.t <= 0 && CUE.nowKey !== c.id && c.kind!=='stay'){
+    CUE.nowKey = c.id; cueEl.classList.add('now');
+    if(c.kind==='duck') Sound.cueDuck(); else Sound.cueJump();
+  }
+  if(CUE.nowKey !== c.id) cueEl.classList.remove('now');
+}
+
 /* ======================================================== ゲーム進行 */
 const _m4 = new THREE.Object3D();
 function supportAt(x, maxY){
@@ -3609,6 +3720,7 @@ function frame(now){
   if(G.splitT > 0){ G.splitT -= dt; if(G.splitT <= 0) UI.split.style.opacity = 0; }
   updateEnemies(dt);
   updateSetPieces(dt);
+  updateCue(dt);
   updateItems(dt);
   updateParticles(dt, camX, G.camY);
   if(G.state==='PLAY' && !G.paused){
@@ -3677,7 +3789,7 @@ precompile();
 requestAnimationFrame(frame);
 window.JBR = {G, IN, world, P, CLIMATES, Store, compile, CHUNKS, STAGES, speedAt, inIce, renderer, scene, camera, Sound,
               sun, setQuality, QUALITY, AT, PF, RV, AV, CROW,
-              fx:{smokeFx, avFx, avWall, snow, glows, puffs, worldGroup, farGroup, skyDome}}; // 調整・検証用
+              CUE, fx:{smokeFx, avFx, avWall, snow, glows, puffs, worldGroup, farGroup, skyDome}}; // 調整・検証用
 </script>
 </body>
 </html>
