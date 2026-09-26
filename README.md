@@ -5,7 +5,7 @@ Claude Code と一緒に作っているゲーム置き場。1作 = 1ディレク
 | 作品 | 内容 | 遊ぶ |
 | --- | --- | --- |
 | [agent64-facility](agent64-facility/) | GoldenEye 007 (N64) 風の潜入 FPS。1面完結。three.js、単一 HTML、外部アセットなし | [プレイ](https://developerMasao.github.io/games/agent64-facility/) |
-| [jet-board-rush](jet-board-rush/) | ジェットボードで雪山を滑り降りるオートスクロール横スクロールアクション。昼から夕焼け、オーロラの夜へ時刻が進む。煙幕を張るカラス・並走して邪魔するライバル・迫る雪崩・大峡谷の大ジャンプ、ゴースト、1プレイ約63秒。スマホ（横向き）対応 | [プレイ](https://developerMasao.github.io/games/jet-board-rush/) |
+| [jet-board-rush](jet-board-rush/) | ジェットボードで雪山を滑り降りるオートスクロール横スクロールアクション。昼から夕焼け、オーロラの夜へ時刻が進む。谷の上の細い氷のレールを跳び継ぐ。押し分けるジャンプ・煙幕を張るカラス・並走するライバル・迫る雪崩・大峡谷の大ジャンプ、1プレイ約64秒。スマホ（横向き）対応 | [プレイ](https://developerMasao.github.io/games/jet-board-rush/) |
 
 ## 遊び方（ローカル）
 
